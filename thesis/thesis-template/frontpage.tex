@@ -1,0 +1,86 @@
+% spellchecker:disable
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Do not change anything below this line!
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{titlepage}
+\vspace*{-1cm}
+\newlength{\links}
+\setlength{\links}{0.9cm}
+\setlength{\TPHorizModule}{1cm}
+\setlength{\TPVertModule}{1cm}
+\textblockorigin{0pt}{0pt}
+
+\sffamily
+\LARGE
+
+\IfLanguageName{ngerman}{
+	\newcommand{\ude}{Universität Duisburg-Essen}
+	\newcommand{\fakultaet}{Fakultät für Informatik}
+	%\newcommand{\abteilung}{Abteilung Allgemeine Informatik}
+	\newcommand{\verteiltesysteme}{Fachgebiet Verteilte Systeme}
+	\newcommand{\matrikelnr}{Matrikelnummer}
+	\newcommand{\erstgutachter}{Erstgutachter}
+	\newcommand{\zweitgutachter}{Zweitgutachter}
+	\newcommand{\betreuer}{Betreuer}
+	\newcommand{\zeitraum}{Zeitraum}
+	\ifthenelse{\equal{\ThesisType}{Bachelor}}{
+		\newcommand{\Thesis}{Bachelorarbeit}
+	}{
+		\newcommand{\Thesis}{Masterarbeit}
+	}
+}{
+	\newcommand{\ude}{University of Duisburg-Essen}
+	\newcommand{\fakultaet}{Faculty of Computer Science}
+	%\newcommand{\abteilung}{Department of Computer Science}
+	\newcommand{\verteiltesysteme}{Distributed Systems Chair}
+	\newcommand{\matrikelnr}{Matriculation number}
+	\newcommand{\erstgutachter}{First examiner}
+	\newcommand{\zweitgutachter}{Second examiner}
+	\newcommand{\betreuer}{Supervisor}
+	\newcommand{\zeitraum}{Time period}
+	\ifthenelse{\equal{\ThesisType}{Bachelor}}{
+		\newcommand{\Thesis}{Bachelor Thesis}
+	}{
+		\newcommand{\Thesis}{Masterar Thesis}
+	}
+}
+
+\begin{textblock}{16.5}(2.8,2.6)
+ \hspace*{-0.25cm} \textbf{\MakeUppercase{\ude}} \vspace*{1mm} \\
+ \hspace*{-1.1cm} \rule{4.2mm}{4.2mm} \hspace*{0.05cm} \MakeUppercase{\fakultaet} \vspace*{1mm} \\
+ %\large{}\MakeUppercase{\abteilung}\\
+\end{textblock}
+
+
+%Hier Titel, Name, und Matrikelnummer eintragen, \\ make a newline
+\begin{textblock}{14.5}(2.8,8.5)
+  \large
+{ \textbf{\Thesis}} \\[1cm]
+{\LARGE \Large\textbf{\ThesisTitle}} \\[1.3cm]
+\StudentName\\
+\matrikelnr : \Matrikelnr\\
+\CourseOfStudies
+\end{textblock}
+
+
+
+\begin{textblock}{10}(10.5,17.5)
+\includegraphics[scale=1.0]{images/unilogo.pdf}\\
+\normalsize
+\raggedleft
+\verteiltesysteme \\
+%\abteilung \\
+\fakultaet \\
+\ude \\[2ex]
+
+\today\\[15ex]
+\raggedright
+% Supervisors
+{\textbf{\erstgutachter :}} \ExaminerFirst \\
+{\textbf{\zweitgutachter :}} \ExaminerSecond \\
+{\textbf{\betreuer :}} \Supervisor \\
+{\textbf{\zeitraum :}} \DTMDate{\StartDate} -- \DTMDate{\EndDate} \\
+\end{textblock}
+
+\end{titlepage}
