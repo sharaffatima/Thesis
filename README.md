@@ -27,8 +27,6 @@ bachelor-thesis/
 |   +-- anoformer/
 |   +-- classic/
 |   `-- tranad/
-+-- thesis/
-|   `-- thesis-template/
 +-- utils/
 |   +-- dataset.py
 |   +-- preprocessing.py
