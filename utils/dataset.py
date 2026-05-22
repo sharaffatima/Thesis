@@ -187,7 +187,7 @@ class TranADDataset(Dataset):
         TimeSeriesData:    np.ndarray,                    # (T, F) – Rohdaten / Raw data
         WindowSize:        int = 64,                      # Fensterlänge / Window length
         Stride:            int = 1,                       # Schrittweite / Step size
-        NormalizationType: str = "zscore",                # "zscore" oder "minmax" / "zscore" or "minmax"
+        NormalizationType: Optional[str] = "zscore",                 # "zscore" oder "minmax" / "zscore" or "minmax"
         Labels:            Optional[np.ndarray] = None,  # (T,) Anomalie-Labels (0/1) / Anomaly labels
     ):
         super().__init__()
@@ -269,7 +269,7 @@ class TranADDataLoader:
         WindowSize:        int   = 64,                    # Fensterlänge / Window size
         TrainingStride:    int   = 4,                     # Stride beim Training / Training stride
         TestStride:        Optional[int]   = None,        # Stride beim Test (None → WindowSize) / Test stride
-        NormalizationType: str   = "zscore",              # Normalisierungstyp / Normalization type
+        NormalizationType: Optional[str]   = "zscore",              # Normalisierungstyp / Normalization type
         BatchSize:         int   = 32,                    # Batch-Größe / Batch size
         TestLabels:        Optional[np.ndarray] = None,  # (T_test,) Ground-Truth Labels / Ground-Truth labels
     ):
