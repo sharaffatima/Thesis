@@ -6,6 +6,7 @@ import math
 from typing import Optional, Tuple
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
+import numpy as np
 
 
 """TranAD: Transformer-basierte Anomalieerkennung – Modellarchitektur und Bausteine."""

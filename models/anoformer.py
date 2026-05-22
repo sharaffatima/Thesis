@@ -6,7 +6,7 @@ import math
 from typing import Optional, Tuple, List
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
-
+import numpy as np
 
 
 """AnoFormer model implementation for time-series anomaly detection."""
