@@ -6,7 +6,7 @@ class ECGReconstructionDataset(Dataset):
     def __init__(self, X, y=None):
         """
         X shape: [num_samples, time_steps, num_leads]
-        Example: [8000, 1000, 12]
+        Example: [1000, 1000, 12]
 
         y shape: [num_samples]
         0 = normal, 1 = anomaly
@@ -22,7 +22,7 @@ class ECGReconstructionDataset(Dataset):
 
         # training: no labels needed
         if self.y is None:
-            return x, x
+            return x
 
         # evaluation: keep label too
-        return x, x, self.y[idx]
+        return x, self.y[idx]
