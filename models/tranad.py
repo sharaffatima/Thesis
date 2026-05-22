@@ -3,10 +3,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import math
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 import numpy as np
+
+
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 """TranAD: Transformer-basierte Anomalieerkennung – Modellarchitektur und Bausteine."""
@@ -827,6 +830,5 @@ class TranADMainModel:
         self.AnomalyThreshold = Checkpoint["AnomalyThreshold"]     # Schwellenwert laden / Load threshold
         self.Network.eval()                                         # Direkt in Eval-Modus / Directly eval mode
         print(f"Model loaded  {FilePath}")
-
 
 
