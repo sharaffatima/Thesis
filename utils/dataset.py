@@ -29,7 +29,16 @@ class ECGReconstructionDataset(Dataset):
 
         # evaluation: keep label too
         return x, self.y[idx]
+    
 
+class SimpleDataManager:
+    def __init__(self, train_loader, test_loader, test_dataset, test_labels, window_size, inv_norm):
+        self.TrainingLoader = train_loader
+        self.TestLoader = test_loader
+        self.TestDataset = test_dataset
+        self.TestLabels = test_labels
+        self.WindowSize = window_size
+        self.TestDataset.InverseNormalization = inv_norm
 
 
 # ============================================================
