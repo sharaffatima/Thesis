@@ -5,7 +5,6 @@ import torch.optim as optim
 import math
 from torch.utils.data import DataLoader
 import numpy as np
-import docstring
 
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
