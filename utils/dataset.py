@@ -31,15 +31,6 @@ class ECGReconstructionDataset(Dataset):
         return x, self.y[idx]
     
 
-class SimpleDataManager:
-    def __init__(self, train_loader, test_loader, test_dataset, test_labels, window_size, inv_norm):
-        self.TrainingLoader = train_loader
-        self.TestLoader = test_loader
-        self.TestDataset = test_dataset
-        self.TestLabels = test_labels
-        self.WindowSize = window_size
-        self.TestDataset.InverseNormalization = inv_norm
-
 
 # ============================================================
 # AnoFormerDataset (PyTorch Dataset-Klasse)
@@ -181,141 +172,57 @@ class AnoFormerDataset(Dataset):
 
 
 # ============================================================
-# TranADDataset & TranADDataLoader
-# Modulares Datenmanagement: Fenstererzeugung, Normalisierung
+# TranAD Dataset: PTBXLTranADDataset
 # ============================================================
 
-class TranADDataset(Dataset):
+class PTBXLTranADDataset(Dataset):
     """
-    PyTorch-Dataset für TranAD: erstellt überlappende Fenster aus einer Zeitreihe.
-    Unterstützt Z-Score- und Min-Max-Normalisierung.
+    Dataset for PTB-XL ECG records.
+
+    Expected X shape:
+        [num_records, time_steps, num_leads]
+        example: [1000, 1000, 12]
+
+    Expected y shape:
+        [num_records]
+        0 = normal, 1 = anomaly
     """
 
-    def __init__(
-        self,
-        TimeSeriesData:    np.ndarray,                    # (T, F) – Rohdaten / Raw data
-        WindowSize:        int = 64,                      # Fensterlänge / Window length
-        Stride:            int = 1,                       # Schrittweite / Step size
-        NormalizationType: Optional[str] = "zscore",                 # "zscore" oder "minmax" / "zscore" or "minmax"
-        Labels:            Optional[np.ndarray] = None,  # (T,) Anomalie-Labels (0/1) / Anomaly labels
-    ):
-        super().__init__()
-        self.WindowSize        = WindowSize         # Fensterbreite speichern / Store window width
-        self.Stride            = Stride             # Schrittweite speichern / Store stride
-        self.NormalizationType = NormalizationType  # Normalisierungstyp / Normalization type
+    def __init__(self, X, y=None, mean=None, std=None, normalize=True):
+        self.X = X.astype(np.float32)
+        self.y = y
 
-        # Normalisierungsparameter (gesetzt in _NormalizeData) / Normalization params (set in _NormalizeData)
-        self.NormalizationMean: Optional[np.ndarray] = None  # (F,) – Z-Score Mittelwert / Z-Score mean
-        self.NormalizationStd:  Optional[np.ndarray] = None  # (F,) – Z-Score Std.-Abw. / Z-Score std
-        self.NormalizationMin:  Optional[np.ndarray] = None  # (F,) – Min-Max Minimum / Min-Max minimum
-        self.NormalizationMax:  Optional[np.ndarray] = None  # (F,) – Min-Max Maximum / Min-Max maximum
+        self.normalize = normalize
 
-        NormalizedData = self._NormalizeData(TimeSeriesData)  # Normalisieren / Normalize
-        TotalLength    = len(NormalizedData)                  # Zeitreihen-Länge / Time series length
-
-        # ── Fenster und Labels erzeugen / Create windows and labels ──
-        self.Windows:      List[np.ndarray] = []   # Liste aller Fenster-Arrays / List of all window arrays
-        self.WindowLabels: List[int]        = []   # Zugehörige binäre Labels / Corresponding binary labels
-
-        for StartIdx in range(0, TotalLength - WindowSize + 1, Stride):
-            EndIdx = StartIdx + WindowSize                          # End-Index des Fensters / Window end index
-            self.Windows.append(NormalizedData[StartIdx:EndIdx].copy())  # Fenster speichern / Store window
-            if Labels is not None:
-                WindowLabel = int(Labels[StartIdx:EndIdx].max())    # 1 wenn irgendein Punkt anomal / 1 if any anomalous
+        if normalize:
+            if mean is None or std is None:
+                # Compute only on training data
+                self.mean = self.X.mean(axis=(0, 1), keepdims=True)
+                self.std = self.X.std(axis=(0, 1), keepdims=True) + 1e-8
             else:
-                WindowLabel = 0                                     # Kein Label → als normal behandeln / No label → treat as normal
-            self.WindowLabels.append(WindowLabel)
+                self.mean = mean
+                self.std = std
 
-        print(
-            f"TranADDataset: {len(self.Windows)} Fenster aus {TotalLength} Zeitpunkten "
-            f"(W={WindowSize}, S={Stride}) / "
-            f"{len(self.Windows)} windows from {TotalLength} timesteps"
-        )
-
-    def _NormalizeData(self, Data: np.ndarray) -> np.ndarray:
-        """Normalisiert und speichert Parameter / Normalizes and stores parameters."""
-        if self.NormalizationType == "zscore":
-            self.NormalizationMean = Data.mean(axis=0)             # Spaltenmittelwerte / Column means
-            self.NormalizationStd  = Data.std(axis=0) + 1e-8       # Std + ε gegen Division durch Null / std + ε
-            return ((Data - self.NormalizationMean) / self.NormalizationStd).astype(np.float32)
-        elif self.NormalizationType == "minmax":
-            self.NormalizationMin = Data.min(axis=0)               # Spalten-Minima / Column minima
-            self.NormalizationMax = Data.max(axis=0)               # Spalten-Maxima / Column maxima
-            Range = self.NormalizationMax - self.NormalizationMin + 1e-8  # Bereich + ε / Range + ε
-            return ((Data - self.NormalizationMin) / Range).astype(np.float32)
+            self.X = (self.X - self.mean) / self.std
         else:
-            raise ValueError(f"Unknown normalization type: {self.NormalizationType}")
+            self.mean = None
+            self.std = None
 
-    def InverseNormalization(self, NormalizedData: np.ndarray) -> np.ndarray:
-        """Macht Normalisierung rückgängig / Reverses normalization."""
-        if self.NormalizationType == "zscore" and self.NormalizationMean is not None:
-            return NormalizedData * self.NormalizationStd + self.NormalizationMean  # Rücktransformation Z-Score
-        elif self.NormalizationType == "minmax" and self.NormalizationMin is not None:
-            Range = self.NormalizationMax - self.NormalizationMin + 1e-8
-            return NormalizedData * Range + self.NormalizationMin               # Rücktransformation Min-Max
-        return NormalizedData  # Keine Normalisierung aktiv / No normalization active
+    def __len__(self):
+        return len(self.X)
 
-    def __len__(self) -> int:
-        return len(self.Windows)                           # Anzahl Fenster / Number of windows
+    def __getitem__(self, idx):
+        x = torch.tensor(self.X[idx], dtype=torch.float32)
 
-    def __getitem__(self, Index: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        WindowTensor = torch.tensor(self.Windows[Index],      dtype=torch.float32)  # Fenster als Float-Tensor
-        LabelTensor  = torch.tensor(self.WindowLabels[Index], dtype=torch.long)     # Label als Long-Tensor
-        return WindowTensor, LabelTensor                   # (T, F), Label
+        if self.y is None:
+            return x, torch.tensor(0, dtype=torch.long)
 
+        label = torch.tensor(self.y[idx], dtype=torch.long)
+        return x, label
 
-# ─────────────────────────────────────────────────────────────────────
-class TranADDataLoader:
-    """
-    Verwaltet Training- und Test-DataLoader für TranAD.
-    Kapselt TranADDataset und torch.utils.data.DataLoader.
-    """
+    def InverseNormalization(self, X):
+      if not self.normalize:
+        return X
 
-    def __init__(
-        self,
-        TrainingData:      np.ndarray,                    # (T_train, F) Trainingsdaten / Training data
-        TestData:          np.ndarray,                    # (T_test, F) Testdaten / Test data
-        WindowSize:        int   = 64,                    # Fensterlänge / Window size
-        TrainingStride:    int   = 4,                     # Stride beim Training / Training stride
-        TestStride:        Optional[int]   = None,        # Stride beim Test (None → WindowSize) / Test stride
-        NormalizationType: Optional[str]   = "zscore",              # Normalisierungstyp / Normalization type
-        BatchSize:         int   = 32,                    # Batch-Größe / Batch size
-        TestLabels:        Optional[np.ndarray] = None,  # (T_test,) Ground-Truth Labels / Ground-Truth labels
-    ):
-        ActualTestStride = TestStride if TestStride is not None else WindowSize  # Kein Überlapp beim Test / No overlap in test
-
-        # ── Datasets erstellen / Create datasets ──────────────────
-        self.TrainingDataset = TranADDataset(
-            TrainingData, WindowSize, TrainingStride, NormalizationType
-        )                                                 # Training: überlappende Fenster / Overlapping windows
-        self.TestDataset = TranADDataset(
-            TestData, WindowSize, ActualTestStride, NormalizationType, Labels=TestLabels
-        )                                                 # Test: kein Überlapp + optionale Labels / No overlap + optional labels
-
-        self.BatchSize   = BatchSize                      # Batch-Größe merken / Store batch size
-        self.WindowSize  = WindowSize                     # Fensterlänge merken / Store window size
-
-        # ── DataLoader erstellen / Create DataLoaders ─────────────
-        self.TrainingLoader = DataLoader(
-            self.TrainingDataset,
-            batch_size  = BatchSize,
-            shuffle     = True,    # Reihenfolge beim Training mischen / Shuffle order during training
-            drop_last   = True,    # Unvollständige Batches verwerfen / Drop incomplete batches
-            num_workers = 0,       # Keine Parallelprozesse (macOS-kompatibel) / No subprocesses
-        )
-        self.TestLoader = DataLoader(
-            self.TestDataset,
-            batch_size  = BatchSize,
-            shuffle     = False,   # Reihenfolge beim Test beibehalten / Keep order during testing
-            drop_last   = False,   # Alle Test-Fenster behalten / Keep all test windows
-            num_workers = 0,
-        )
-
-        print(
-            f"TranADDataLoader: "
-            f"Train-Batches={len(self.TrainingLoader)} | "
-            f"Test-Batches={len(self.TestLoader)} | "
-            f"Batch size={BatchSize}"
-        )
-
+      return X * self.std.squeeze() + self.mean.squeeze()
 
