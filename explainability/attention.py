@@ -5,7 +5,7 @@ import numpy as np
 from typing import Optional, List
 from models.anoformer import AnoFormerMainModel
 from models.tranad import TranADMainModel
-from utils.dataset import TranADDataset
+from utils.dataset import PTBXLTranADDataset
 
 
 """Attention Explainability and Visualization helpers."""
@@ -346,7 +346,7 @@ class TranADExplainability:
         self,
         TimeSeriesWindow:      torch.Tensor,                    # (1, T, F)
         FeatureIndex:          int = 0,                        # Zu visualisierendes Feature / Feature to visualize
-        DatasetForInverseNorm: Optional[TranADDataset] = None, # Für Rücktransformation / For inverse transform
+        DatasetForInverseNorm: Optional[PTBXLTranADDataset] = None, # Für Rücktransformation / For inverse transform
     ) -> None:
         """
         Vergleicht Phase-1- und Phase-2-Rekonstruktion mit dem Original.
