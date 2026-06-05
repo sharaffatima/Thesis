@@ -1,4 +1,6 @@
-﻿import torch
+﻿from matplotlib.axis import Axis
+
+import torch
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import numpy as np
@@ -35,23 +37,29 @@ class AnoFormerExplainability:
         BlockIndex: int = 0,              # Welcher Encoder-Block soll visualisiert werden?
         HeadIndex: int  = 0,              # Welcher Attention-Kopf (0 bis NumHeads-1)?
         TitleSuffix: str = "",            # Optionaler Zusatz im Diagrammtitel
+        UsePercentileScaling: bool = True,
+        Percentile: float = 99.0,
     ) -> None:
+        
         """
-        Visualisiert die Attention-Gewichts-Matrix eines bestimmten Encoder-Blocks.
-        Zeile i = Query-Token i, Spalte j = Key-Token j.
-        Hoher Wert → Token i beachtet Token j stark.
-        """
-        self.Model.Generator.eval()                      # Eval-Modus: kein Dropout
-        Input = TimeSeriesWindow.to(self.Device)         # Fenster auf Rechengerät
+        Visualizes the attention matrix of one AnoFormer encoder block.
 
-        with torch.no_grad():                            # Kein Gradient nötig (nur Forward-Pass)
-            Embedded      = self.Model.Generator.InputEmbedding(Input)        # Features einbetten
-            WithPosition  = self.Model.Generator.PositionalEncoding(Embedded) # Positionskodierung
+        Rows = query timesteps.
+        Columns = key timesteps.
+        Bright columns mean many timesteps attend to the same key timestep.
+        """
+
+        self.Model.Generator.eval() 
+        Input = TimeSeriesWindow.to(self.Device) 
+
+        with torch.no_grad(): 
+            Embedded      = self.Model.Generator.InputEmbedding(Input) 
+            WithPosition  = self.Model.Generator.PositionalEncoding(Embedded) 
             CurrentTensor = WithPosition
             for i, Block in enumerate(self.Model.Generator.EncoderStack.EncoderBlockList):
-                CurrentTensor = Block(CurrentTensor)     # Schritt für Schritt durch Encoder-Blöcke
+                CurrentTensor = Block(CurrentTensor) 
                 if i == BlockIndex:
-                    break                                # Beim gewünschten Block aufhören
+                    break  
 
         # Gespeicherte Attention-Gewichte aus dem Ziel-Block lesen: (1, H, T, T)
         AttWeights = self.Model.Generator.EncoderStack.EncoderBlockList[
@@ -59,20 +67,45 @@ class AnoFormerExplainability:
         ].SelfAttention.StoredAttentionWeights
 
         if AttWeights is None:                           # Sicherheitscheck – Gewichte vorhanden?
-            print("Keine Attention-Gewichte verfügbar.")
+            print("No attention weights available.")
             return
 
-        AttMatrix = AttWeights[0, HeadIndex].cpu().numpy()  # (T, T) – für einen Kopf auf CPU
+        AttMatrix = AttWeights[0, HeadIndex].detach().cpu().numpy() 
 
-        # ── Plot ─────────────────────────────────────────────────
+        print("Attention shape:", AttMatrix.shape)
+        print("min:", AttMatrix.min())
+        print("max:", AttMatrix.max())
+        print("mean:", AttMatrix.mean())
+        print("std:", AttMatrix.std())
+
+
+        if UsePercentileScaling:
+            vmax = np.percentile(AttMatrix, Percentile)
+        else:
+            vmax = AttMatrix.max()
+
         fig, Axis = plt.subplots(figsize=(9, 7))
-        HeatmapImage = Axis.imshow(AttMatrix, aspect="auto", cmap="viridis", interpolation="nearest")
-        plt.colorbar(HeatmapImage, ax=Axis, label="Attention-Gewicht")   # Farblegende
-        Axis.set_xlabel("Key-Zeitschritt (beachtetes Token)")             # X-Achse
-        Axis.set_ylabel("Query-Zeitschritt (schauendes Token)")           # Y-Achse
-        Axis.set_title(f"Attention-Heatmap | Block {BlockIndex}, Kopf {HeadIndex} {TitleSuffix}")
+
+        HeatmapImage = Axis.imshow(
+            AttMatrix,
+            aspect="auto",
+            cmap="viridis",
+            interpolation="nearest",
+            vmin=0,
+            vmax=vmax,
+        )
+
+        plt.colorbar(HeatmapImage, ax=Axis, label="Attention weight")
+        Axis.set_xlabel("Key timestep")
+        Axis.set_ylabel("Query timestep")
+        Axis.set_title(
+            f"Attention heatmap | Block {BlockIndex}, Head {HeadIndex} {TitleSuffix}"
+        )
+
         plt.tight_layout()
         plt.show()
+
+
 
     # ──────────────────────────────────────────────────────────
     def ShowFeatureImportance(
