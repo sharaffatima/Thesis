@@ -9,8 +9,7 @@ as attention visualizations and SHAP-style feature attribution.
 
 ```text
 bachelor-thesis/
-+-- dataset/
-|   `-- ptb-xl-a-large-publicly-available-electrocardiography-dataset-1.0.3/
+
 +-- explainability/
 |   +-- attention.py
 |   `-- shap.py
@@ -19,21 +18,17 @@ bachelor-thesis/
 |   +-- classic.py
 |   `-- tranad.py
 +-- notebooks/
-|   +-- preprocessing.ipynb
-|   +-- train_anoformer.ipynb
-|   +-- train_classic.ipynb
-|   `-- train_tranad.ipynb
+|   +-- 01_preprocessing.ipynb
+|   +-- 02_train_anoformer.ipynb
+|   `-- 03_train_tranad.ipynb
 +-- results/
 |   +-- anoformer/
 |   +-- classic/
 |   `-- tranad/
 +-- utils/
 |   +-- dataset.py
-|   +-- preprocessing.py
-|   +-- ptbxl_loader.py
 |   +-- seed.py
-|   `-- training.py
+
 +-- requirements.txt
-+-- tagebuch.md
 `-- README.md
 ```
