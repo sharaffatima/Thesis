@@ -13,15 +13,13 @@ from utils.dataset import PTBXLTranADDataset
 """Attention Explainability and Visualization helpers."""
 
 # ============================================================
-# AnoFormer Explainability-Klasse
-# Macht Modellentscheidungen nachvollziehbar und visualisierbar
+# AnoFormer Explainability-Class
 # ============================================================
 
 class AnoFormerExplainability:
     """
     Erklärt AnoFormer-Entscheidungen mit vier Methoden:
       1. Attention-Heatmap   – wo schaut das Modell hin?
-      2. Feature-Wichtigkeit – welche Features lösen den Alarm aus? (Gradient × Input)
       3. Rekonstruktionsfehler-Plot – Original vs. Rekonstruktion + Score-Kurve
       4. Trainings-Verlaufsplot – Entwicklung aller Loss-Komponenten
     """
@@ -107,113 +105,132 @@ class AnoFormerExplainability:
 
 
 
+
+
     # ──────────────────────────────────────────────────────────
-    def ShowFeatureImportance(
+    def GetAttentionImportance(
         self,
-        TimeSeriesWindow: torch.Tensor,    # Einzelnes Fenster: (1, T, F)
-        FeatureNames: list[str] | None = None,  # Optionale Feature-Beschriftungen
+        TimeSeriesWindow: torch.Tensor,
+        BlockIndex: int = 0,
+        HeadIndex: int = 0,
     ) -> np.ndarray:
+        
         """
-        Berechnet Feature-Wichtigkeit mit der Gradient×Input-Methode (Saliency).
-        Formel: Wichtigkeit(t, f) = |∂L/∂x(t,f) · x(t,f)|
-        Hoher Wert → Feature f zur Zeit t hat starken Einfluss auf den Rekonstruktionsfehler.
-        Rückgabe: (T, F) Wichtigkeitsmatrix
+        Returns mean attention received per timestep.
+        Shape: (T,)
         """
-        self.Model.Generator.eval()                                   # Eval-Modus
-        Input = TimeSeriesWindow.to(self.Device).requires_grad_(True) # Gradient auf Eingabe aktivieren
 
-        Masked, _ = self.Model.Masking(Input.detach(), None)           # Maskierung ohne Gradient
-        Masked    = Masked.requires_grad_(True)                        # Gradient auf Maske aktivieren
+        self.Model.Generator.eval()
+        Input = TimeSeriesWindow.to(self.Device)
 
-        Reconstruction = self.Model.Generator(Masked)                  # Forward-Pass
-        Loss = F.mse_loss(Reconstruction, Input.detach())              # Skalar-Loss berechnen
-        Loss.backward()                                                # Rückwärtsdurchlauf
+        with torch.no_grad():
+            Embedded = self.Model.Generator.InputEmbedding(Input)
+            WithPosition = self.Model.Generator.PositionalEncoding(Embedded)
+            CurrentTensor = WithPosition
 
-        # Gradient×Input: kombiniert Richtung und Stärke der Aktivierung
-        GradientImportance = (Masked.grad * Masked).abs()              # (1, T, F) – absolute Wichtigkeit
-        ImportanceMatrix   = GradientImportance[0].detach().cpu().numpy()  # (T, F) auf CPU
+            for i, Block in enumerate(self.Model.Generator.EncoderStack.EncoderBlockList):
+                CurrentTensor = Block(CurrentTensor)
+                if i == BlockIndex:
+                    break
 
-        # ── Plot ─────────────────────────────────────────────────
-        fig, Axes = plt.subplots(1, 2, figsize=(14, 4))
+        AttWeights = self.Model.Generator.EncoderStack.EncoderBlockList[
+            BlockIndex
+        ].SelfAttention.StoredAttentionWeights
 
-        # Linkes Teilbild: mittlere Wichtigkeit über Zeit (eine Linie pro Zeitschritt)
-        Axes[0].plot(ImportanceMatrix.mean(axis=1), color="darkorange", linewidth=1.5)
-        Axes[0].set_title("Mittlere Feature-Wichtigkeit über Zeit")
-        Axes[0].set_xlabel("Zeitschritt")
-        Axes[0].set_ylabel("Wichtigkeit")
-        Axes[0].grid(alpha=0.3)
+        if AttWeights is None:
+            raise ValueError("No attention weights available.")
 
-        # Rechtes Teilbild: Heatmap aller Features × Zeit
-        HeatmapImage = Axes[1].imshow(
-            ImportanceMatrix.T,                           # Transponieren: Features als Zeilen
-            aspect="auto", cmap="hot", interpolation="nearest"
-        )
-        plt.colorbar(HeatmapImage, ax=Axes[1], label="|Gradient × Input|")
-        Axes[1].set_xlabel("Zeitschritt")
-        Axes[1].set_ylabel("Feature-Index")
-        Axes[1].set_title("Feature-Wichtigkeits-Heatmap")
-        if FeatureNames:                                  # Optionale Feature-Beschriftung
-            Axes[1].set_yticks(range(len(FeatureNames)))
-            Axes[1].set_yticklabels(FeatureNames, fontsize=8)
+        AttMatrix = AttWeights[0, HeadIndex].detach().cpu().numpy()
 
-        plt.tight_layout()
-        plt.show()
-        return ImportanceMatrix                           # Matrix für weitere Analysen zurückgeben
+        # Mean attention received by each key timestep
+        AttentionImportance = AttMatrix.mean(axis=0)
 
+        return AttentionImportance
+    
     # ──────────────────────────────────────────────────────────
-    def ShowReconstructionError(
+
+    def GetReconstructionErrorOverTime(
         self,
-        OriginalData: np.ndarray,         # Originalzeitreihe (T, F) – in Originalskala
-        ReconstructedData: np.ndarray,    # Rekonstruierte Zeitreihe (T, F)
-        AnomalyScores: np.ndarray,        # Anomalie-Scores pro Fenster (N,)
-        TrueLabels: np.ndarray | None = None,  # Optionale Ground-Truth-Labels
-        Threshold: float | None = None,   # Entscheidungsschwelle (horizontale Linie)
-    ) -> None:
+        TimeSeriesWindow: torch.Tensor,
+        DatasetForInverseNorm,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Drei-Panel-Visualisierung:
-          1. Original vs. Rekonstruktion (bis zu 3 Features)
-          2. Anomalie-Score-Kurve mit Schwellenwert
-          3. Vorhergesagte vs. wahre Anomalien
+        Returns:
+            Original data in original scale: (T, F)
+            Reconstructed data in original scale: (T, F)
+            Reconstruction error over time: (T,)
         """
-        fig, Axes = plt.subplots(3, 1, figsize=(14, 10), sharex=True)  # 3 Teilbilder, gleiche X-Achse
 
-        TimeAxis = np.arange(len(OriginalData))   # Zeitachse: 0, 1, 2, …, T-1
+        self.Model.Generator.eval()
+        Input = TimeSeriesWindow.to(self.Device)
 
-        # ── Panel 1: Original vs. Rekonstruktion ─────────────────
-        for f in range(min(3, OriginalData.shape[1])):             # Maximal 3 Features zeigen
-            Axes[0].plot(TimeAxis, OriginalData[:, f], linewidth=0.8, label=f"Original F{f}")
-            Axes[0].plot(TimeAxis, ReconstructedData[:, f], linewidth=0.8,
-                         linestyle="--", alpha=0.7, label=f"Rekonstruiert F{f}")
-        Axes[0].set_title("Original vs. Rekonstruktion")
-        Axes[0].legend(fontsize=7, ncol=4)         # Kompakte Legende
-        Axes[0].grid(alpha=0.3)
+        with torch.no_grad():
+            Masked, _ = self.Model.Masking(Input, None)
+            Reconstructed = self.Model.Generator(Masked)
 
-        # ── Panel 2: Anomalie-Score ───────────────────────────────
-        ScoreTimeAxis = np.arange(len(AnomalyScores))              # Score-Zeitachse
-        Axes[1].fill_between(ScoreTimeAxis, AnomalyScores, alpha=0.5, color="crimson", label="Score")
-        Axes[1].plot(ScoreTimeAxis, AnomalyScores, linewidth=0.8, color="crimson")
-        if Threshold is not None:                                  # Schwellenwert einzeichnen
-            Axes[1].axhline(Threshold, color="black", linestyle="--",
-                            linewidth=1.2, label=f"Schwelle={Threshold:.4f}")
-        Axes[1].set_title("Anomalie-Score (MSE)")
-        Axes[1].legend(fontsize=8)
-        Axes[1].grid(alpha=0.3)
+        OriginalNP = DatasetForInverseNorm.InverseNormalization(
+            Input[0].detach().cpu().numpy()
+        )
 
-        # ── Panel 3: Klassifikation ───────────────────────────────
-        if Threshold is not None:
-            PredictedAnomalies = (AnomalyScores > Threshold).astype(int)  # Binäre Vorhersage
-            Axes[2].fill_between(ScoreTimeAxis, PredictedAnomalies, alpha=0.6,
-                                 color="darkorange", label="Vorhergesagt")
-        if TrueLabels is not None:                                 # Ground-Truth einblenden
-            Axes[2].fill_between(np.arange(len(TrueLabels)), TrueLabels * 0.5, alpha=0.5,
-                                 color="steelblue", label="Wahr (skaliert)")
-        Axes[2].set_title("Anomalie-Klassifikation")
-        Axes[2].legend(fontsize=8)
-        Axes[2].set_xlabel("Zeitschritt")
-        Axes[2].grid(alpha=0.3)
+        ReconstructedNP = DatasetForInverseNorm.InverseNormalization(
+            Reconstructed[0].detach().cpu().numpy()
+        )
+
+        ReconstructionError = ((OriginalNP - ReconstructedNP) ** 2).mean(axis=1)
+
+        return OriginalNP, ReconstructedNP, ReconstructionError
+    
+    # ──────────────────────────────────────────────────────────
+    def ShowAttentionAndReconstructionError(
+        self,
+        TimeSeriesWindow: torch.Tensor,
+        DatasetForInverseNorm,
+        BlockIndex: int = 0,
+        HeadIndex: int = 0,
+        TitleSuffix: str = "",
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Plots attention importance and reconstruction error over time.
+
+        Attention:
+            Which timesteps were used as temporal context?
+
+        Reconstruction error:
+            Where did the model fail to reconstruct the ECG?
+        """
+
+        _, _, ReconstructionError = self.GetReconstructionErrorOverTime(
+            TimeSeriesWindow=TimeSeriesWindow,
+            DatasetForInverseNorm=DatasetForInverseNorm,
+        )
+
+        AttentionImportance = self.GetAttentionImportance(
+            TimeSeriesWindow=TimeSeriesWindow,
+            BlockIndex=BlockIndex,
+            HeadIndex=HeadIndex,
+        )
+
+        ErrorScaled = ReconstructionError / (ReconstructionError.max() + 1e-8)
+        AttentionScaled = AttentionImportance / (AttentionImportance.max() + 1e-8)
+
+        plt.figure(figsize=(14, 4))
+
+        plt.plot(ErrorScaled, label="Reconstruction error", linewidth=1.5)
+        plt.plot(AttentionScaled, label="Attention importance", linewidth=1.5, alpha=0.8)
+
+        plt.title(
+            f"Attention vs. Reconstruction Error over Time {TitleSuffix}"
+        )
+        plt.xlabel("Timestep")
+        plt.ylabel("Normalized value")
+        plt.legend()
+        plt.grid(alpha=0.3)
 
         plt.tight_layout()
         plt.show()
+
+        return AttentionImportance, ReconstructionError
+
 
     # ──────────────────────────────────────────────────────────
     def ShowTrainingHistory(self) -> None:
