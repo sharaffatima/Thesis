@@ -271,153 +271,153 @@ class AnoFormerExplainability:
 
 
     def CompareNormalAndAnomalousAttention(
-    self,
-    NormalWindow: torch.Tensor,
-    AnomalousWindow: torch.Tensor,
-    DatasetForInverseNorm,
-    NormalIndex: int,
-    AnomalousIndex: int,
-    LeadIndex: int = 1,
-    LeadName: str = "II",
-    BlockIndex: int = 0,
-    HeadIndex: int = 0,
-    Percentile: float = 99.0,
-) -> None:
-    """
-    Compares attention and reconstruction behavior for one normal and one anomalous ECG.
+        self,
+        NormalWindow: torch.Tensor,
+        AnomalousWindow: torch.Tensor,
+        DatasetForInverseNorm,
+        NormalIndex: int,
+        AnomalousIndex: int,
+        LeadIndex: int = 1,
+        LeadName: str = "II",
+        BlockIndex: int = 0,
+        HeadIndex: int = 0,
+        Percentile: float = 99.0,
+    ) -> None:
+        """
+        Compares attention and reconstruction behavior for one normal and one anomalous ECG.
 
-    Rows:
-        1. Original vs reconstructed signal for one ECG lead
-        2. Attention heatmap
-        3. Attention importance vs reconstruction error over time
-    """
+        Rows:
+            1. Original vs reconstructed signal for one ECG lead
+            2. Attention heatmap
+            3. Attention importance vs reconstruction error over time
+        """
 
-    self.Model.Generator.eval()
+        self.Model.Generator.eval()
 
-    def compute_all(Window):
-        Input = Window.to(self.Device)
+        def compute_all(Window):
+            Input = Window.to(self.Device)
 
-        # Reconstruction
-        with torch.no_grad():
-            Masked, _ = self.Model.Masking(Input, None)
-            Reconstructed = self.Model.Generator(Masked)
+            # Reconstruction
+            with torch.no_grad():
+                Masked, _ = self.Model.Masking(Input, None)
+                Reconstructed = self.Model.Generator(Masked)
 
-        OriginalNP = DatasetForInverseNorm.InverseNormalization(
-            Input[0].detach().cpu().numpy()
+            OriginalNP = DatasetForInverseNorm.InverseNormalization(
+                Input[0].detach().cpu().numpy()
+            )
+
+            ReconstructedNP = DatasetForInverseNorm.InverseNormalization(
+                Reconstructed[0].detach().cpu().numpy()
+            )
+
+            ReconstructionError = ((OriginalNP - ReconstructedNP) ** 2).mean(axis=1)
+
+            # Attention
+            with torch.no_grad():
+                Embedded = self.Model.Generator.InputEmbedding(Input)
+                WithPosition = self.Model.Generator.PositionalEncoding(Embedded)
+                CurrentTensor = WithPosition
+
+                for i, Block in enumerate(self.Model.Generator.EncoderStack.EncoderBlockList):
+                    CurrentTensor = Block(CurrentTensor)
+                    if i == BlockIndex:
+                        break
+
+            AttWeights = self.Model.Generator.EncoderStack.EncoderBlockList[
+                BlockIndex
+            ].SelfAttention.StoredAttentionWeights
+
+            if AttWeights is None:
+                raise ValueError("No attention weights available.")
+
+            AttMatrix = AttWeights[0, HeadIndex].detach().cpu().numpy()
+            AttentionImportance = AttMatrix.mean(axis=0)
+
+            return OriginalNP, ReconstructedNP, ReconstructionError, AttMatrix, AttentionImportance
+
+        normal_original, normal_rec, normal_error, normal_att, normal_att_imp = compute_all(NormalWindow)
+        anom_original, anom_rec, anom_error, anom_att, anom_att_imp = compute_all(AnomalousWindow)
+
+        fig, axes = plt.subplots(3, 2, figsize=(18, 12))
+
+        time_axis = np.arange(normal_original.shape[0])
+
+        # ── Row 1: Original vs Reconstruction ─────────────────────
+        axes[0, 0].plot(time_axis, normal_original[:, LeadIndex], label="Original", linewidth=1.0)
+        axes[0, 0].plot(time_axis, normal_rec[:, LeadIndex], label="Reconstructed", linestyle="--", linewidth=1.0)
+        axes[0, 0].set_title(f"NORMAL ECG | Sample {NormalIndex} | Lead {LeadName}")
+        axes[0, 0].set_ylabel("Amplitude")
+        axes[0, 0].legend()
+        axes[0, 0].grid(alpha=0.3)
+
+        axes[0, 1].plot(time_axis, anom_original[:, LeadIndex], label="Original", linewidth=1.0)
+        axes[0, 1].plot(time_axis, anom_rec[:, LeadIndex], label="Reconstructed", linestyle="--", linewidth=1.0)
+        axes[0, 1].set_title(f"ANOMALOUS ECG | Sample {AnomalousIndex} | Lead {LeadName}")
+        axes[0, 1].set_ylabel("Amplitude")
+        axes[0, 1].legend()
+        axes[0, 1].grid(alpha=0.3)
+
+        # ── Row 2: Attention heatmaps ─────────────────────────────
+        normal_vmax = np.percentile(normal_att, Percentile)
+        anom_vmax = np.percentile(anom_att, Percentile)
+
+        im0 = axes[1, 0].imshow(
+            normal_att,
+            aspect="auto",
+            cmap="viridis",
+            interpolation="nearest",
+            vmin=0,
+            vmax=normal_vmax,
+        )
+        axes[1, 0].set_title(f"Attention Heatmap | Normal | Block {BlockIndex}, Head {HeadIndex}")
+        axes[1, 0].set_xlabel("Key timestep")
+        axes[1, 0].set_ylabel("Query timestep")
+        fig.colorbar(im0, ax=axes[1, 0], fraction=0.046, pad=0.04)
+
+        im1 = axes[1, 1].imshow(
+            anom_att,
+            aspect="auto",
+            cmap="viridis",
+            interpolation="nearest",
+            vmin=0,
+            vmax=anom_vmax,
+        )
+        axes[1, 1].set_title(f"Attention Heatmap | Anomalous | Block {BlockIndex}, Head {HeadIndex}")
+        axes[1, 1].set_xlabel("Key timestep")
+        axes[1, 1].set_ylabel("Query timestep")
+        fig.colorbar(im1, ax=axes[1, 1], fraction=0.046, pad=0.04)
+
+        # ── Row 3: Attention vs Reconstruction Error ──────────────
+        normal_error_scaled = normal_error / (normal_error.max() + 1e-8)
+        normal_att_scaled = normal_att_imp / (normal_att_imp.max() + 1e-8)
+
+        anom_error_scaled = anom_error / (anom_error.max() + 1e-8)
+        anom_att_scaled = anom_att_imp / (anom_att_imp.max() + 1e-8)
+
+        axes[2, 0].plot(time_axis, normal_error_scaled, label="Reconstruction error", linewidth=1.2)
+        axes[2, 0].plot(time_axis, normal_att_scaled, label="Attention importance", linewidth=1.2, alpha=0.8)
+        axes[2, 0].set_title("Attention vs Reconstruction Error | Normal")
+        axes[2, 0].set_xlabel("Timestep")
+        axes[2, 0].set_ylabel("Normalized value")
+        axes[2, 0].legend()
+        axes[2, 0].grid(alpha=0.3)
+
+        axes[2, 1].plot(time_axis, anom_error_scaled, label="Reconstruction error", linewidth=1.2)
+        axes[2, 1].plot(time_axis, anom_att_scaled, label="Attention importance", linewidth=1.2, alpha=0.8)
+        axes[2, 1].set_title("Attention vs Reconstruction Error | Anomalous")
+        axes[2, 1].set_xlabel("Timestep")
+        axes[2, 1].set_ylabel("Normalized value")
+        axes[2, 1].legend()
+        axes[2, 1].grid(alpha=0.3)
+
+        plt.suptitle(
+            "AnoFormer Attention-based Explanation: Normal vs Anomalous ECG",
+            fontsize=16,
+            fontweight="bold",
         )
 
-        ReconstructedNP = DatasetForInverseNorm.InverseNormalization(
-            Reconstructed[0].detach().cpu().numpy()
-        )
-
-        ReconstructionError = ((OriginalNP - ReconstructedNP) ** 2).mean(axis=1)
-
-        # Attention
-        with torch.no_grad():
-            Embedded = self.Model.Generator.InputEmbedding(Input)
-            WithPosition = self.Model.Generator.PositionalEncoding(Embedded)
-            CurrentTensor = WithPosition
-
-            for i, Block in enumerate(self.Model.Generator.EncoderStack.EncoderBlockList):
-                CurrentTensor = Block(CurrentTensor)
-                if i == BlockIndex:
-                    break
-
-        AttWeights = self.Model.Generator.EncoderStack.EncoderBlockList[
-            BlockIndex
-        ].SelfAttention.StoredAttentionWeights
-
-        if AttWeights is None:
-            raise ValueError("No attention weights available.")
-
-        AttMatrix = AttWeights[0, HeadIndex].detach().cpu().numpy()
-        AttentionImportance = AttMatrix.mean(axis=0)
-
-        return OriginalNP, ReconstructedNP, ReconstructionError, AttMatrix, AttentionImportance
-
-    normal_original, normal_rec, normal_error, normal_att, normal_att_imp = compute_all(NormalWindow)
-    anom_original, anom_rec, anom_error, anom_att, anom_att_imp = compute_all(AnomalousWindow)
-
-    fig, axes = plt.subplots(3, 2, figsize=(18, 12))
-
-    time_axis = np.arange(normal_original.shape[0])
-
-    # ── Row 1: Original vs Reconstruction ─────────────────────
-    axes[0, 0].plot(time_axis, normal_original[:, LeadIndex], label="Original", linewidth=1.0)
-    axes[0, 0].plot(time_axis, normal_rec[:, LeadIndex], label="Reconstructed", linestyle="--", linewidth=1.0)
-    axes[0, 0].set_title(f"NORMAL ECG | Sample {NormalIndex} | Lead {LeadName}")
-    axes[0, 0].set_ylabel("Amplitude")
-    axes[0, 0].legend()
-    axes[0, 0].grid(alpha=0.3)
-
-    axes[0, 1].plot(time_axis, anom_original[:, LeadIndex], label="Original", linewidth=1.0)
-    axes[0, 1].plot(time_axis, anom_rec[:, LeadIndex], label="Reconstructed", linestyle="--", linewidth=1.0)
-    axes[0, 1].set_title(f"ANOMALOUS ECG | Sample {AnomalousIndex} | Lead {LeadName}")
-    axes[0, 1].set_ylabel("Amplitude")
-    axes[0, 1].legend()
-    axes[0, 1].grid(alpha=0.3)
-
-    # ── Row 2: Attention heatmaps ─────────────────────────────
-    normal_vmax = np.percentile(normal_att, Percentile)
-    anom_vmax = np.percentile(anom_att, Percentile)
-
-    im0 = axes[1, 0].imshow(
-        normal_att,
-        aspect="auto",
-        cmap="viridis",
-        interpolation="nearest",
-        vmin=0,
-        vmax=normal_vmax,
-    )
-    axes[1, 0].set_title(f"Attention Heatmap | Normal | Block {BlockIndex}, Head {HeadIndex}")
-    axes[1, 0].set_xlabel("Key timestep")
-    axes[1, 0].set_ylabel("Query timestep")
-    fig.colorbar(im0, ax=axes[1, 0], fraction=0.046, pad=0.04)
-
-    im1 = axes[1, 1].imshow(
-        anom_att,
-        aspect="auto",
-        cmap="viridis",
-        interpolation="nearest",
-        vmin=0,
-        vmax=anom_vmax,
-    )
-    axes[1, 1].set_title(f"Attention Heatmap | Anomalous | Block {BlockIndex}, Head {HeadIndex}")
-    axes[1, 1].set_xlabel("Key timestep")
-    axes[1, 1].set_ylabel("Query timestep")
-    fig.colorbar(im1, ax=axes[1, 1], fraction=0.046, pad=0.04)
-
-    # ── Row 3: Attention vs Reconstruction Error ──────────────
-    normal_error_scaled = normal_error / (normal_error.max() + 1e-8)
-    normal_att_scaled = normal_att_imp / (normal_att_imp.max() + 1e-8)
-
-    anom_error_scaled = anom_error / (anom_error.max() + 1e-8)
-    anom_att_scaled = anom_att_imp / (anom_att_imp.max() + 1e-8)
-
-    axes[2, 0].plot(time_axis, normal_error_scaled, label="Reconstruction error", linewidth=1.2)
-    axes[2, 0].plot(time_axis, normal_att_scaled, label="Attention importance", linewidth=1.2, alpha=0.8)
-    axes[2, 0].set_title("Attention vs Reconstruction Error | Normal")
-    axes[2, 0].set_xlabel("Timestep")
-    axes[2, 0].set_ylabel("Normalized value")
-    axes[2, 0].legend()
-    axes[2, 0].grid(alpha=0.3)
-
-    axes[2, 1].plot(time_axis, anom_error_scaled, label="Reconstruction error", linewidth=1.2)
-    axes[2, 1].plot(time_axis, anom_att_scaled, label="Attention importance", linewidth=1.2, alpha=0.8)
-    axes[2, 1].set_title("Attention vs Reconstruction Error | Anomalous")
-    axes[2, 1].set_xlabel("Timestep")
-    axes[2, 1].set_ylabel("Normalized value")
-    axes[2, 1].legend()
-    axes[2, 1].grid(alpha=0.3)
-
-    plt.suptitle(
-        "AnoFormer Attention-based Explanation: Normal vs Anomalous ECG",
-        fontsize=16,
-        fontweight="bold",
-    )
-
-    plt.tight_layout()
-    plt.show()
+        plt.tight_layout()
+        plt.show()
 
 
 
