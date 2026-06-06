@@ -9,7 +9,6 @@ from models.tranad import TranADMainModel
 from utils.dataset import PTBXLTranADDataset
 
 
-"""Attention Explainability and Visualization helpers."""
 
 # ============================================================
 # AnoFormer Attention Explainability
@@ -191,7 +190,11 @@ class AnoFormerExplainability:
 
 
 
-        # ── Row 1: Original vs reconstruction, grouped and vertically stacked ECG leads ─────
+        # ============================================================
+        # Figure 1: Original vs Reconstruction for all 12 leads
+        # ============================================================
+
+        fig1, axes1 = plt.subplots(4, 2, figsize=(22, 12), sharex=True)
 
         ECG_LEADS = [
             "I", "II", "III",
@@ -200,10 +203,10 @@ class AnoFormerExplainability:
         ]
 
         LeadGroups = [
-            [0, 1, 2],      # I, II, III
-            [3, 4, 5],      # aVR, aVL, aVF
-            [6, 7, 8],      # V1, V2, V3
-            [9, 10, 11],    # V4, V5, V6
+            [0, 1, 2],
+            [3, 4, 5],
+            [6, 7, 8],
+            [9, 10, 11],
         ]
 
         GroupTitles = [
@@ -215,36 +218,13 @@ class AnoFormerExplainability:
 
         LeadOffset = 2.5
 
-        # Create nested subplots inside the top-left and top-right cells
-        normal_subgrid = axes[0, 0].get_subplotspec().subgridspec(
-            4, 1, hspace=0.65
-        )
-        anom_subgrid = axes[0, 1].get_subplotspec().subgridspec(
-            4, 1, hspace=0.65
-        )
-
-        # Remove the original top-row axes because we replace them with 4 smaller axes each
-        axes[0, 0].remove()
-        axes[0, 1].remove()
-
-        normal_lead_axes = [
-            fig.add_subplot(normal_subgrid[i, 0]) for i in range(4)
-        ]
-        anom_lead_axes = [
-            fig.add_subplot(anom_subgrid[i, 0]) for i in range(4)
-        ]
-
         for group_idx, lead_group in enumerate(LeadGroups):
-            ax_normal = normal_lead_axes[group_idx]
-            ax_anom = anom_lead_axes[group_idx]
+            ax_normal = axes1[group_idx, 0]
+            ax_anom = axes1[group_idx, 1]
 
             for local_idx, lead_idx in enumerate(lead_group):
-                lead_name = ECG_LEADS[lead_idx]
-
-                # Reverse order so first lead appears at the top
                 offset = (len(lead_group) - 1 - local_idx) * LeadOffset
 
-                # Normal ECG
                 ax_normal.plot(
                     time_axis,
                     normal_original[:, lead_idx] + offset,
@@ -259,7 +239,6 @@ class AnoFormerExplainability:
                     label="Reconstructed" if group_idx == 0 and local_idx == 0 else None,
                 )
 
-                # Anomalous ECG
                 ax_anom.plot(
                     time_axis,
                     anom_original[:, lead_idx] + offset,
@@ -279,10 +258,7 @@ class AnoFormerExplainability:
                 for i in range(len(lead_group))
             ]
 
-            ytick_labels = [
-                ECG_LEADS[lead_idx]
-                for lead_idx in lead_group
-            ]
+            ytick_labels = [ECG_LEADS[lead_idx] for lead_idx in lead_group]
 
             ax_normal.set_yticks(ytick_positions)
             ax_normal.set_yticklabels(ytick_labels)
@@ -294,22 +270,40 @@ class AnoFormerExplainability:
             ax_anom.set_title(f"Anomalous ECG | {GroupTitles[group_idx]}", fontsize=10)
             ax_anom.grid(alpha=0.25)
 
-        # Column labels
-        normal_lead_axes[0].set_ylabel(f"Sample {NormalIndex}")
-        anom_lead_axes[0].set_ylabel(f"Sample {AnomalousIndex}")
+        axes1[0, 0].legend(fontsize=8, loc="upper right")
+        axes1[0, 1].legend(fontsize=8, loc="upper right")
 
-        # Show x-label only on bottom group plots
-        normal_lead_axes[-1].set_xlabel("Timestep")
-        anom_lead_axes[-1].set_xlabel("Timestep")
+        axes1[-1, 0].set_xlabel("Timestep")
+        axes1[-1, 1].set_xlabel("Timestep")
 
-        # One legend per column
-        normal_lead_axes[0].legend(fontsize=8, loc="upper right")
-        anom_lead_axes[0].legend(fontsize=8, loc="upper right")
+        fig1.suptitle(
+            f"Original vs Reconstructed ECG | Normal Sample {NormalIndex} vs Anomalous Sample {AnomalousIndex}",
+            fontsize=16,
+            fontweight="bold",
+        )
+
+        plt.tight_layout()
+        plt.show()
 
 
 
-        # ── Row 2: Attention heatmaps ─────────────────────────────
-        im0 = axes[1, 0].imshow(
+        # ============================================================
+        # Figure 2: Attention Heatmaps
+        # ============================================================
+
+        fig2, axes2 = plt.subplots(1, 2, figsize=(18, 6))
+
+        shared_vmax = max(
+            np.percentile(normal_att, Percentile),
+            np.percentile(anom_att, Percentile),
+        )
+
+        if HeadIndex is None:
+            attention_title = f"Block {BlockIndex}, all heads averaged"
+        else:
+            attention_title = f"Block {BlockIndex}, Head {HeadIndex}"
+
+        im0 = axes2[0].imshow(
             normal_att,
             aspect="auto",
             cmap="viridis",
@@ -317,12 +311,12 @@ class AnoFormerExplainability:
             vmin=0,
             vmax=shared_vmax,
         )
-        axes[1, 0].set_title(f"Attention Heatmap | Normal | {attention_title}")
-        axes[1, 0].set_xlabel("Key timestep")
-        axes[1, 0].set_ylabel("Query timestep")
-        fig.colorbar(im0, ax=axes[1, 0], fraction=0.046, pad=0.04)
+        axes2[0].set_title(f"Normal ECG | Attention Heatmap | {attention_title}")
+        axes2[0].set_xlabel("Key timestep")
+        axes2[0].set_ylabel("Query timestep")
+        fig2.colorbar(im0, ax=axes2[0], fraction=0.046, pad=0.04)
 
-        im1 = axes[1, 1].imshow(
+        im1 = axes2[1].imshow(
             anom_att,
             aspect="auto",
             cmap="viridis",
@@ -330,64 +324,79 @@ class AnoFormerExplainability:
             vmin=0,
             vmax=shared_vmax,
         )
-        axes[1, 1].set_title(f"Attention Heatmap | Anomalous | {attention_title}")
-        axes[1, 1].set_xlabel("Key timestep")
-        axes[1, 1].set_ylabel("Query timestep")
-        fig.colorbar(im1, ax=axes[1, 1], fraction=0.046, pad=0.04)
+        axes2[1].set_title(f"Anomalous ECG | Attention Heatmap | {attention_title}")
+        axes2[1].set_xlabel("Key timestep")
+        axes2[1].set_ylabel("Query timestep")
+        fig2.colorbar(im1, ax=axes2[1], fraction=0.046, pad=0.04)
 
-        # ── Row 3: Attention vs reconstruction error ──────────────
-        normal_error_scaled = normal_error / (normal_error.max() + 1e-8)
-        normal_att_scaled = normal_att_imp / (normal_att_imp.max() + 1e-8)
-
-        anom_error_scaled = anom_error / (anom_error.max() + 1e-8)
-        anom_att_scaled = anom_att_imp / (anom_att_imp.max() + 1e-8)
-
-        axes[2, 0].plot(
-            time_axis,
-            normal_error_scaled,
-            label="Reconstruction error",
-            linewidth=1.2,
-        )
-        axes[2, 0].plot(
-            time_axis,
-            normal_att_scaled,
-            label="Attention importance",
-            linewidth=1.2,
-            alpha=0.8,
-        )
-        axes[2, 0].set_title("Attention vs Reconstruction Error | Normal")
-        axes[2, 0].set_xlabel("Timestep")
-        axes[2, 0].set_ylabel("Normalized value")
-        axes[2, 0].legend()
-        axes[2, 0].grid(alpha=0.3)
-
-        axes[2, 1].plot(
-            time_axis,
-            anom_error_scaled,
-            label="Reconstruction error",
-            linewidth=1.2,
-        )
-        axes[2, 1].plot(
-            time_axis,
-            anom_att_scaled,
-            label="Attention importance",
-            linewidth=1.2,
-            alpha=0.8,
-        )
-        axes[2, 1].set_title("Attention vs Reconstruction Error | Anomalous")
-        axes[2, 1].set_xlabel("Timestep")
-        axes[2, 1].set_ylabel("Normalized value")
-        axes[2, 1].legend()
-        axes[2, 1].grid(alpha=0.3)
-
-        plt.suptitle(
-            "AnoFormer Attention-based Explanation: Normal vs Anomalous ECG",
+        fig2.suptitle(
+            f"Attention Heatmaps | Normal Sample {NormalIndex} vs Anomalous Sample {AnomalousIndex}",
             fontsize=16,
             fontweight="bold",
         )
 
         plt.tight_layout()
         plt.show()
+
+        # ============================================================
+        # Figure 3: Attention vs Reconstruction Error
+        # ============================================================
+
+        fig3, axes3 = plt.subplots(1, 2, figsize=(18, 5), sharey=True)
+
+        normal_error_scaled = normal_error / (normal_error.max() + 1e-8)
+        normal_att_scaled = normal_att_imp / (normal_att_imp.max() + 1e-8)
+
+        anom_error_scaled = anom_error / (anom_error.max() + 1e-8)
+        anom_att_scaled = anom_att_imp / (anom_att_imp.max() + 1e-8)
+
+        axes3[0].plot(
+            time_axis,
+            normal_error_scaled,
+            label="Reconstruction error",
+            linewidth=1.2,
+        )
+        axes3[0].plot(
+            time_axis,
+            normal_att_scaled,
+            label="Attention importance",
+            linewidth=1.2,
+            alpha=0.8,
+        )
+        axes3[0].set_title(f"Normal ECG | Sample {NormalIndex}")
+        axes3[0].set_xlabel("Timestep")
+        axes3[0].set_ylabel("Normalized value")
+        axes3[0].legend()
+        axes3[0].grid(alpha=0.3)
+
+        axes3[1].plot(
+            time_axis,
+            anom_error_scaled,
+            label="Reconstruction error",
+            linewidth=1.2,
+        )
+        axes3[1].plot(
+            time_axis,
+            anom_att_scaled,
+            label="Attention importance",
+            linewidth=1.2,
+            alpha=0.8,
+        )
+        axes3[1].set_title(f"Anomalous ECG | Sample {AnomalousIndex}")
+        axes3[1].set_xlabel("Timestep")
+        axes3[1].legend()
+        axes3[1].grid(alpha=0.3)
+
+        fig3.suptitle(
+            "Attention Importance vs Reconstruction Error",
+            fontsize=16,
+            fontweight="bold",
+        )
+
+        plt.tight_layout()
+        plt.show()
+
+
 
     # ──────────────────────────────────────────────────────────
     def ShowTrainingHistory(self) -> None:
