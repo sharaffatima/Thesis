@@ -342,7 +342,11 @@ class AnoFormerExplainability:
         # Real values, separate y-axes
         # ============================================================
 
-        fig3, axes3 = plt.subplots(1, 2, figsize=(18, 5), sharex=True)
+        fig3, axes3 = plt.subplots(
+            1, 2,
+            figsize=(20, 5),
+            sharex=True,
+        )
 
         def plot_attention_vs_error(ax, error, attention, title):
             ax_attention = ax.twinx()
@@ -350,23 +354,32 @@ class AnoFormerExplainability:
             line1 = ax.plot(
                 time_axis,
                 error,
+                color="tab:yellow",
                 label="Reconstruction error",
-                linewidth=1.2,
+                linewidth=1.5,
             )
 
             line2 = ax_attention.plot(
                 time_axis,
                 attention,
+                color="tab:blue",
                 label="Attention importance",
-                linewidth=1.2,
-                alpha=0.8,
+                linewidth=1.5,
                 linestyle="--",
             )
 
             ax.set_title(title)
             ax.set_xlabel("Timestep")
-            ax.set_ylabel("Reconstruction error (MSE across 12 leads)")
-            ax_attention.set_ylabel("Mean attention received")
+            ax.set_ylabel(
+                "Reconstruction error (MSE across 12 leads)",
+                color="tab:yellow",
+            )
+            ax_attention.set_ylabel(
+                "Mean attention received",
+                color="tab:blue",
+            )
+            ax.tick_params(axis="y", colors="tab:yellow")
+            ax_attention.tick_params(axis="y", colors="tab:blue")
 
             ax.grid(alpha=0.3)
 
@@ -391,12 +404,13 @@ class AnoFormerExplainability:
         )
 
         fig3.suptitle(
-            "Attention Importance vs Reconstruction Error",
+            "Temporal Attention and Reconstruction Error",
             fontsize=16,
             fontweight="bold",
         )
 
         plt.tight_layout()
+        fig3.subplots_adjust(wspace=0.35)
         plt.show()
 
 
