@@ -1,9 +1,8 @@
-﻿from matplotlib.axis import Axis
-
+﻿import numpy as np
 import torch
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
-import numpy as np
+
 from typing import Optional, List
 from models.anoformer import AnoFormerMainModel
 from models.tranad import TranADMainModel
@@ -13,111 +12,38 @@ from utils.dataset import PTBXLTranADDataset
 """Attention Explainability and Visualization helpers."""
 
 # ============================================================
-# AnoFormer Explainability-Class
+# AnoFormer Attention Explainability
 # ============================================================
 
 class AnoFormerExplainability:
     """
-    Erklärt AnoFormer-Entscheidungen mit vier Methoden:
-      1. Attention-Heatmap   – wo schaut das Modell hin?
-      3. Rekonstruktionsfehler-Plot – Original vs. Rekonstruktion + Score-Kurve
-      4. Trainings-Verlaufsplot – Entwicklung aller Loss-Komponenten
+    Attention-based explainability for AnoFormer on ECG data.
+
+    Purpose:
+      1. Compare original and reconstructed ECG signals.
+      2. Visualize temporal self-attention.
+      3. Compare attention importance with reconstruction error.
+
+    Important:
+      Attention explains temporal focus, not lead importance.
+      Reconstruction error is the direct basis of the anomaly score.
     """
 
-    def __init__(self, AnoFormerModel: AnoFormerMainModel):
-        self.Model  = AnoFormerModel          # Referenz auf das Hauptmodell
-        self.Device = AnoFormerModel.Device   # Gerät vom Modell übernehmen
+    def __init__(self, AnoFormerModel):
+        self.Model = AnoFormerModel
+        self.Device = AnoFormerModel.Device
 
     # ──────────────────────────────────────────────────────────
-    def ShowAttentionHeatmap(
-        self,
-        TimeSeriesWindow: torch.Tensor,   # Ein einzelnes Fenster: (1, T, F)
-        BlockIndex: int = 0,              # Welcher Encoder-Block soll visualisiert werden?
-        HeadIndex: int  = 0,              # Welcher Attention-Kopf (0 bis NumHeads-1)?
-        TitleSuffix: str = "",            # Optionaler Zusatz im Diagrammtitel
-        UsePercentileScaling: bool = True,
-        Percentile: float = 99.0,
-    ) -> None:
-        
-        """
-        Visualizes the attention matrix of one AnoFormer encoder block.
-
-        Rows = query timesteps.
-        Columns = key timesteps.
-        Bright columns mean many timesteps attend to the same key timestep.
-        """
-
-        self.Model.Generator.eval() 
-        Input = TimeSeriesWindow.to(self.Device) 
-
-        with torch.no_grad(): 
-            Embedded      = self.Model.Generator.InputEmbedding(Input) 
-            WithPosition  = self.Model.Generator.PositionalEncoding(Embedded) 
-            CurrentTensor = WithPosition
-            for i, Block in enumerate(self.Model.Generator.EncoderStack.EncoderBlockList):
-                CurrentTensor = Block(CurrentTensor) 
-                if i == BlockIndex:
-                    break  
-
-        # Gespeicherte Attention-Gewichte aus dem Ziel-Block lesen: (1, H, T, T)
-        AttWeights = self.Model.Generator.EncoderStack.EncoderBlockList[
-            BlockIndex
-        ].SelfAttention.StoredAttentionWeights
-
-        if AttWeights is None:                           # Sicherheitscheck – Gewichte vorhanden?
-            print("No attention weights available.")
-            return
-
-        AttMatrix = AttWeights[0, HeadIndex].detach().cpu().numpy() 
-
-        print("Attention shape:", AttMatrix.shape)
-        print("min:", AttMatrix.min())
-        print("max:", AttMatrix.max())
-        print("mean:", AttMatrix.mean())
-        print("std:", AttMatrix.std())
-
-
-        if UsePercentileScaling:
-            vmax = np.percentile(AttMatrix, Percentile)
-        else:
-            vmax = AttMatrix.max()
-
-        fig, Axis = plt.subplots(figsize=(9, 7))
-
-        HeatmapImage = Axis.imshow(
-            AttMatrix,
-            aspect="auto",
-            cmap="viridis",
-            interpolation="nearest",
-            vmin=0,
-            vmax=vmax,
-        )
-
-        plt.colorbar(HeatmapImage, ax=Axis, label="Attention weight")
-        Axis.set_xlabel("Key timestep")
-        Axis.set_ylabel("Query timestep")
-        Axis.set_title(
-            f"Attention heatmap | Block {BlockIndex}, Head {HeadIndex} {TitleSuffix}"
-        )
-
-        plt.tight_layout()
-        plt.show()
-
-
-
-
-
-    # ──────────────────────────────────────────────────────────
-    def GetAttentionImportance(
+    def _get_attention_matrix(
         self,
         TimeSeriesWindow: torch.Tensor,
         BlockIndex: int = 0,
-        HeadIndex: int = 0,
+        HeadIndex: int | None = None,
     ) -> np.ndarray:
-        
         """
-        Returns mean attention received per timestep.
-        Shape: (T,)
+        Returns attention matrix of shape (T, T).
+
+        If HeadIndex is None, attention is averaged across all heads.
         """
 
         self.Model.Generator.eval()
@@ -140,15 +66,37 @@ class AnoFormerExplainability:
         if AttWeights is None:
             raise ValueError("No attention weights available.")
 
-        AttMatrix = AttWeights[0, HeadIndex].detach().cpu().numpy()
+        # AttWeights shape: (1, heads, T, T)
+        if HeadIndex is None:
+            AttMatrix = AttWeights[0].mean(dim=0).detach().cpu().numpy()
+        else:
+            AttMatrix = AttWeights[0, HeadIndex].detach().cpu().numpy()
 
-        # Mean attention received by each key timestep
+        return AttMatrix
+
+    # ──────────────────────────────────────────────────────────
+    def GetAttentionImportance(
+        self,
+        TimeSeriesWindow: torch.Tensor,
+        BlockIndex: int = 0,
+        HeadIndex: int | None = None,
+    ) -> np.ndarray:
+        """
+        Returns mean attention received per timestep.
+        Shape: (T,)
+        """
+
+        AttMatrix = self._get_attention_matrix(
+            TimeSeriesWindow=TimeSeriesWindow,
+            BlockIndex=BlockIndex,
+            HeadIndex=HeadIndex,
+        )
+
         AttentionImportance = AttMatrix.mean(axis=0)
 
         return AttentionImportance
-    
-    # ──────────────────────────────────────────────────────────
 
+    # ──────────────────────────────────────────────────────────
     def GetReconstructionErrorOverTime(
         self,
         TimeSeriesWindow: torch.Tensor,
@@ -156,8 +104,8 @@ class AnoFormerExplainability:
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Returns:
-            Original data in original scale: (T, F)
-            Reconstructed data in original scale: (T, F)
+            Original data: (T, F)
+            Reconstructed data: (T, F)
             Reconstruction error over time: (T,)
         """
 
@@ -176,100 +124,12 @@ class AnoFormerExplainability:
             Reconstructed[0].detach().cpu().numpy()
         )
 
+        # Mean squared error across all 12 leads per timestep
         ReconstructionError = ((OriginalNP - ReconstructedNP) ** 2).mean(axis=1)
 
         return OriginalNP, ReconstructedNP, ReconstructionError
-    
-    # ──────────────────────────────────────────────────────────
-    def ShowAttentionAndReconstructionError(
-        self,
-        TimeSeriesWindow: torch.Tensor,
-        DatasetForInverseNorm,
-        BlockIndex: int = 0,
-        HeadIndex: int = 0,
-        TitleSuffix: str = "",
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Plots attention importance and reconstruction error over time.
-
-        Attention:
-            Which timesteps were used as temporal context?
-
-        Reconstruction error:
-            Where did the model fail to reconstruct the ECG?
-        """
-
-        _, _, ReconstructionError = self.GetReconstructionErrorOverTime(
-            TimeSeriesWindow=TimeSeriesWindow,
-            DatasetForInverseNorm=DatasetForInverseNorm,
-        )
-
-        AttentionImportance = self.GetAttentionImportance(
-            TimeSeriesWindow=TimeSeriesWindow,
-            BlockIndex=BlockIndex,
-            HeadIndex=HeadIndex,
-        )
-
-        ErrorScaled = ReconstructionError / (ReconstructionError.max() + 1e-8)
-        AttentionScaled = AttentionImportance / (AttentionImportance.max() + 1e-8)
-
-        plt.figure(figsize=(14, 4))
-
-        plt.plot(ErrorScaled, label="Reconstruction error", linewidth=1.5)
-        plt.plot(AttentionScaled, label="Attention importance", linewidth=1.5, alpha=0.8)
-
-        plt.title(
-            f"Attention vs. Reconstruction Error over Time {TitleSuffix}"
-        )
-        plt.xlabel("Timestep")
-        plt.ylabel("Normalized value")
-        plt.legend()
-        plt.grid(alpha=0.3)
-
-        plt.tight_layout()
-        plt.show()
-
-        return AttentionImportance, ReconstructionError
-
 
     # ──────────────────────────────────────────────────────────
-    def ShowTrainingHistory(self) -> None:
-        """
-        Zeigt den GAN-Trainingsverlauf in zwei Teilbildern:
-          Links:  Generator-Loss-Komponenten (Gesamt, GAN, Rekonstruktion)
-          Rechts: Diskriminator-Loss
-        """
-        History = self.Model.TrainingHistory              # Verlaufsdaten holen
-        if not any(History.values()):                     # Noch kein Training → Abbruch
-            print("Kein Trainingsverlauf verfügbar.")
-            return
-
-        fig, Axes = plt.subplots(1, 2, figsize=(13, 4))   # Zwei nebeneinander liegende Plots
-
-        Epochs = range(1, len(History["GeneratorTotalLoss"]) + 1)   # X-Achse: Epochennummern
-
-        # ── Linkes Teilbild: Generator-Verluste ──────────────────
-        Axes[0].plot(Epochs, History["GeneratorTotalLoss"], label="G Gesamt",        linewidth=1.5)
-        Axes[0].plot(Epochs, History["GeneratorGANLoss"],   label="G GAN",           linewidth=1.2, linestyle="--")
-        Axes[0].plot(Epochs, History["GeneratorRecLoss"],   label="G Rekonstruktion",linewidth=1.2, linestyle=":")
-        Axes[0].set_title("Generator-Verlust")
-        Axes[0].set_xlabel("Epoche")
-        Axes[0].legend()
-        Axes[0].grid(alpha=0.3)
-
-        # ── Rechtes Teilbild: Diskriminator-Verlust ──────────────
-        Axes[1].plot(Epochs, History["DiscriminatorLoss"], color="crimson", linewidth=1.5, label="D-Verlust")
-        Axes[1].set_title("Diskriminator-Verlust")
-        Axes[1].set_xlabel("Epoche")
-        Axes[1].legend()
-        Axes[1].grid(alpha=0.3)
-
-        plt.suptitle("AnoFormer – Trainingsverlauf", fontweight="bold")  # Obertitel
-        plt.tight_layout()
-        plt.show()
-
-
-
     def CompareNormalAndAnomalousAttention(
         self,
         NormalWindow: torch.Tensor,
@@ -280,57 +140,33 @@ class AnoFormerExplainability:
         LeadIndex: int = 1,
         LeadName: str = "II",
         BlockIndex: int = 0,
-        HeadIndex: int = 0,
+        HeadIndex: int | None = None,
         Percentile: float = 99.0,
     ) -> None:
         """
-        Compares attention and reconstruction behavior for one normal and one anomalous ECG.
+        Compares attention and reconstruction behavior for one normal
+        and one anomalous ECG.
 
         Rows:
-            1. Original vs reconstructed signal for one ECG lead
-            2. Attention heatmap
-            3. Attention importance vs reconstruction error over time
+          1. Original vs reconstructed signal for one ECG lead.
+          2. Attention heatmap.
+          3. Attention importance vs reconstruction error.
         """
 
-        self.Model.Generator.eval()
-
         def compute_all(Window):
-            Input = Window.to(self.Device)
-
-            # Reconstruction
-            with torch.no_grad():
-                Masked, _ = self.Model.Masking(Input, None)
-                Reconstructed = self.Model.Generator(Masked)
-
-            OriginalNP = DatasetForInverseNorm.InverseNormalization(
-                Input[0].detach().cpu().numpy()
+            OriginalNP, ReconstructedNP, ReconstructionError = (
+                self.GetReconstructionErrorOverTime(
+                    TimeSeriesWindow=Window,
+                    DatasetForInverseNorm=DatasetForInverseNorm,
+                )
             )
 
-            ReconstructedNP = DatasetForInverseNorm.InverseNormalization(
-                Reconstructed[0].detach().cpu().numpy()
+            AttMatrix = self._get_attention_matrix(
+                TimeSeriesWindow=Window,
+                BlockIndex=BlockIndex,
+                HeadIndex=HeadIndex,
             )
 
-            ReconstructionError = ((OriginalNP - ReconstructedNP) ** 2).mean(axis=1)
-
-            # Attention
-            with torch.no_grad():
-                Embedded = self.Model.Generator.InputEmbedding(Input)
-                WithPosition = self.Model.Generator.PositionalEncoding(Embedded)
-                CurrentTensor = WithPosition
-
-                for i, Block in enumerate(self.Model.Generator.EncoderStack.EncoderBlockList):
-                    CurrentTensor = Block(CurrentTensor)
-                    if i == BlockIndex:
-                        break
-
-            AttWeights = self.Model.Generator.EncoderStack.EncoderBlockList[
-                BlockIndex
-            ].SelfAttention.StoredAttentionWeights
-
-            if AttWeights is None:
-                raise ValueError("No attention weights available.")
-
-            AttMatrix = AttWeights[0, HeadIndex].detach().cpu().numpy()
             AttentionImportance = AttMatrix.mean(axis=0)
 
             return OriginalNP, ReconstructedNP, ReconstructionError, AttMatrix, AttentionImportance
@@ -338,38 +174,68 @@ class AnoFormerExplainability:
         normal_original, normal_rec, normal_error, normal_att, normal_att_imp = compute_all(NormalWindow)
         anom_original, anom_rec, anom_error, anom_att, anom_att_imp = compute_all(AnomalousWindow)
 
-        fig, axes = plt.subplots(3, 2, figsize=(18, 12))
-
         time_axis = np.arange(normal_original.shape[0])
 
-        # ── Row 1: Original vs Reconstruction ─────────────────────
-        axes[0, 0].plot(time_axis, normal_original[:, LeadIndex], label="Original", linewidth=1.0)
-        axes[0, 0].plot(time_axis, normal_rec[:, LeadIndex], label="Reconstructed", linestyle="--", linewidth=1.0)
+        # Shared heatmap scale for fair comparison
+        shared_vmax = max(
+            np.percentile(normal_att, Percentile),
+            np.percentile(anom_att, Percentile),
+        )
+
+        if HeadIndex is None:
+            attention_title = f"Block {BlockIndex}, all heads averaged"
+        else:
+            attention_title = f"Block {BlockIndex}, Head {HeadIndex}"
+
+        fig, axes = plt.subplots(3, 2, figsize=(18, 12))
+
+        # ── Row 1: Original vs reconstruction ─────────────────────
+        axes[0, 0].plot(
+            time_axis,
+            normal_original[:, LeadIndex],
+            label="Original",
+            linewidth=1.0,
+        )
+        axes[0, 0].plot(
+            time_axis,
+            normal_rec[:, LeadIndex],
+            label="Reconstructed",
+            linestyle="--",
+            linewidth=1.0,
+        )
         axes[0, 0].set_title(f"NORMAL ECG | Sample {NormalIndex} | Lead {LeadName}")
         axes[0, 0].set_ylabel("Amplitude")
         axes[0, 0].legend()
         axes[0, 0].grid(alpha=0.3)
 
-        axes[0, 1].plot(time_axis, anom_original[:, LeadIndex], label="Original", linewidth=1.0)
-        axes[0, 1].plot(time_axis, anom_rec[:, LeadIndex], label="Reconstructed", linestyle="--", linewidth=1.0)
+        axes[0, 1].plot(
+            time_axis,
+            anom_original[:, LeadIndex],
+            label="Original",
+            linewidth=1.0,
+        )
+        axes[0, 1].plot(
+            time_axis,
+            anom_rec[:, LeadIndex],
+            label="Reconstructed",
+            linestyle="--",
+            linewidth=1.0,
+        )
         axes[0, 1].set_title(f"ANOMALOUS ECG | Sample {AnomalousIndex} | Lead {LeadName}")
         axes[0, 1].set_ylabel("Amplitude")
         axes[0, 1].legend()
         axes[0, 1].grid(alpha=0.3)
 
         # ── Row 2: Attention heatmaps ─────────────────────────────
-        normal_vmax = np.percentile(normal_att, Percentile)
-        anom_vmax = np.percentile(anom_att, Percentile)
-
         im0 = axes[1, 0].imshow(
             normal_att,
             aspect="auto",
             cmap="viridis",
             interpolation="nearest",
             vmin=0,
-            vmax=normal_vmax,
+            vmax=shared_vmax,
         )
-        axes[1, 0].set_title(f"Attention Heatmap | Normal | Block {BlockIndex}, Head {HeadIndex}")
+        axes[1, 0].set_title(f"Attention Heatmap | Normal | {attention_title}")
         axes[1, 0].set_xlabel("Key timestep")
         axes[1, 0].set_ylabel("Query timestep")
         fig.colorbar(im0, ax=axes[1, 0], fraction=0.046, pad=0.04)
@@ -380,30 +246,52 @@ class AnoFormerExplainability:
             cmap="viridis",
             interpolation="nearest",
             vmin=0,
-            vmax=anom_vmax,
+            vmax=shared_vmax,
         )
-        axes[1, 1].set_title(f"Attention Heatmap | Anomalous | Block {BlockIndex}, Head {HeadIndex}")
+        axes[1, 1].set_title(f"Attention Heatmap | Anomalous | {attention_title}")
         axes[1, 1].set_xlabel("Key timestep")
         axes[1, 1].set_ylabel("Query timestep")
         fig.colorbar(im1, ax=axes[1, 1], fraction=0.046, pad=0.04)
 
-        # ── Row 3: Attention vs Reconstruction Error ──────────────
+        # ── Row 3: Attention vs reconstruction error ──────────────
         normal_error_scaled = normal_error / (normal_error.max() + 1e-8)
         normal_att_scaled = normal_att_imp / (normal_att_imp.max() + 1e-8)
 
         anom_error_scaled = anom_error / (anom_error.max() + 1e-8)
         anom_att_scaled = anom_att_imp / (anom_att_imp.max() + 1e-8)
 
-        axes[2, 0].plot(time_axis, normal_error_scaled, label="Reconstruction error", linewidth=1.2)
-        axes[2, 0].plot(time_axis, normal_att_scaled, label="Attention importance", linewidth=1.2, alpha=0.8)
+        axes[2, 0].plot(
+            time_axis,
+            normal_error_scaled,
+            label="Reconstruction error",
+            linewidth=1.2,
+        )
+        axes[2, 0].plot(
+            time_axis,
+            normal_att_scaled,
+            label="Attention importance",
+            linewidth=1.2,
+            alpha=0.8,
+        )
         axes[2, 0].set_title("Attention vs Reconstruction Error | Normal")
         axes[2, 0].set_xlabel("Timestep")
         axes[2, 0].set_ylabel("Normalized value")
         axes[2, 0].legend()
         axes[2, 0].grid(alpha=0.3)
 
-        axes[2, 1].plot(time_axis, anom_error_scaled, label="Reconstruction error", linewidth=1.2)
-        axes[2, 1].plot(time_axis, anom_att_scaled, label="Attention importance", linewidth=1.2, alpha=0.8)
+        axes[2, 1].plot(
+            time_axis,
+            anom_error_scaled,
+            label="Reconstruction error",
+            linewidth=1.2,
+        )
+        axes[2, 1].plot(
+            time_axis,
+            anom_att_scaled,
+            label="Attention importance",
+            linewidth=1.2,
+            alpha=0.8,
+        )
         axes[2, 1].set_title("Attention vs Reconstruction Error | Anomalous")
         axes[2, 1].set_xlabel("Timestep")
         axes[2, 1].set_ylabel("Normalized value")
@@ -419,6 +307,39 @@ class AnoFormerExplainability:
         plt.tight_layout()
         plt.show()
 
+    # ──────────────────────────────────────────────────────────
+    def ShowTrainingHistory(self) -> None:
+        """
+        Shows generator and discriminator loss curves.
+        """
+
+        History = self.Model.TrainingHistory
+
+        if not any(History.values()):
+            print("No training history available.")
+            return
+
+        fig, axes = plt.subplots(1, 2, figsize=(13, 4))
+
+        epochs = range(1, len(History["GeneratorTotalLoss"]) + 1)
+
+        axes[0].plot(epochs, History["GeneratorTotalLoss"], label="G total", linewidth=1.5)
+        axes[0].plot(epochs, History["GeneratorGANLoss"], label="G GAN", linewidth=1.2, linestyle="--")
+        axes[0].plot(epochs, History["GeneratorRecLoss"], label="G reconstruction", linewidth=1.2, linestyle=":")
+        axes[0].set_title("Generator loss")
+        axes[0].set_xlabel("Epoch")
+        axes[0].legend()
+        axes[0].grid(alpha=0.3)
+
+        axes[1].plot(epochs, History["DiscriminatorLoss"], label="D loss", linewidth=1.5)
+        axes[1].set_title("Discriminator loss")
+        axes[1].set_xlabel("Epoch")
+        axes[1].legend()
+        axes[1].grid(alpha=0.3)
+
+        plt.suptitle("AnoFormer Training History", fontweight="bold")
+        plt.tight_layout()
+        plt.show()
 
 
 
