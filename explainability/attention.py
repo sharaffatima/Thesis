@@ -187,11 +187,12 @@ class AnoFormerExplainability:
         else:
             attention_title = f"Block {BlockIndex}, Head {HeadIndex}"
 
-        fig, axes = plt.subplots(3, 2, figsize=(20, 18))
+        fig, axes = plt.subplots(3, 2, figsize=(22, 22))
 
 
 
-        # ── Row 1: Original vs reconstruction, grouped ECG leads ─────
+        # ── Row 1: Original vs reconstruction, grouped and vertically stacked ECG leads ─────
+
         ECG_LEADS = [
             "I", "II", "III",
             "aVR", "aVL", "aVF",
@@ -199,10 +200,10 @@ class AnoFormerExplainability:
         ]
 
         LeadGroups = [
-            [0, 1, 2],      # Limb leads
-            [3, 4, 5],      # Augmented leads
-            [6, 7, 8],      # Precordial V1-V3
-            [9, 10, 11],    # Precordial V4-V6
+            [0, 1, 2],      # I, II, III
+            [3, 4, 5],      # aVR, aVL, aVF
+            [6, 7, 8],      # V1, V2, V3
+            [9, 10, 11],    # V4, V5, V6
         ]
 
         GroupTitles = [
@@ -212,63 +213,100 @@ class AnoFormerExplainability:
             "Leads V4, V5, V6",
         ]
 
-        # Create nested subplots inside top-left and top-right cells
-        normal_subgrid = axes[0, 0].get_subplotspec().subgridspec(4, 1, hspace=0.35)
-        anom_subgrid = axes[0, 1].get_subplotspec().subgridspec(4, 1, hspace=0.35)
+        LeadOffset = 2.5
 
+        # Create nested subplots inside the top-left and top-right cells
+        normal_subgrid = axes[0, 0].get_subplotspec().subgridspec(
+            4, 1, hspace=0.65
+        )
+        anom_subgrid = axes[0, 1].get_subplotspec().subgridspec(
+            4, 1, hspace=0.65
+        )
+
+        # Remove the original top-row axes because we replace them with 4 smaller axes each
         axes[0, 0].remove()
         axes[0, 1].remove()
 
-        normal_lead_axes = [fig.add_subplot(normal_subgrid[i, 0]) for i in range(4)]
-        anom_lead_axes = [fig.add_subplot(anom_subgrid[i, 0]) for i in range(4)]
+        normal_lead_axes = [
+            fig.add_subplot(normal_subgrid[i, 0]) for i in range(4)
+        ]
+        anom_lead_axes = [
+            fig.add_subplot(anom_subgrid[i, 0]) for i in range(4)
+        ]
 
         for group_idx, lead_group in enumerate(LeadGroups):
-            ax_n = normal_lead_axes[group_idx]
-            ax_a = anom_lead_axes[group_idx]
+            ax_normal = normal_lead_axes[group_idx]
+            ax_anom = anom_lead_axes[group_idx]
 
-            for lead_idx in lead_group:
+            for local_idx, lead_idx in enumerate(lead_group):
                 lead_name = ECG_LEADS[lead_idx]
 
-                ax_n.plot(
+                # Reverse order so first lead appears at the top
+                offset = (len(lead_group) - 1 - local_idx) * LeadOffset
+
+                # Normal ECG
+                ax_normal.plot(
                     time_axis,
-                    normal_original[:, lead_idx],
+                    normal_original[:, lead_idx] + offset,
                     linewidth=0.8,
-                    label=f"{lead_name} original",
+                    label="Original" if group_idx == 0 and local_idx == 0 else None,
                 )
-                ax_n.plot(
+                ax_normal.plot(
                     time_axis,
-                    normal_rec[:, lead_idx],
+                    normal_rec[:, lead_idx] + offset,
                     linestyle="--",
                     linewidth=0.8,
-                    label=f"{lead_name} reconstructed",
+                    label="Reconstructed" if group_idx == 0 and local_idx == 0 else None,
                 )
 
-                ax_a.plot(
+                # Anomalous ECG
+                ax_anom.plot(
                     time_axis,
-                    anom_original[:, lead_idx],
+                    anom_original[:, lead_idx] + offset,
                     linewidth=0.8,
-                    label=f"{lead_name} original",
+                    label="Original" if group_idx == 0 and local_idx == 0 else None,
                 )
-                ax_a.plot(
+                ax_anom.plot(
                     time_axis,
-                    anom_rec[:, lead_idx],
+                    anom_rec[:, lead_idx] + offset,
                     linestyle="--",
                     linewidth=0.8,
-                    label=f"{lead_name} reconstructed",
+                    label="Reconstructed" if group_idx == 0 and local_idx == 0 else None,
                 )
 
-            ax_n.set_title(f"Normal | {GroupTitles[group_idx]}", fontsize=9)
-            ax_n.grid(alpha=0.3)
-            ax_n.legend(fontsize=6, ncol=3)
+            ytick_positions = [
+                (len(lead_group) - 1 - i) * LeadOffset
+                for i in range(len(lead_group))
+            ]
 
-            ax_a.set_title(f"Anomalous | {GroupTitles[group_idx]}", fontsize=9)
-            ax_a.grid(alpha=0.3)
-            ax_a.legend(fontsize=6, ncol=3)
+            ytick_labels = [
+                ECG_LEADS[lead_idx]
+                for lead_idx in lead_group
+            ]
 
-        normal_lead_axes[-1].set_xlabel("Timestep")
-        anom_lead_axes[-1].set_xlabel("Timestep")
+            ax_normal.set_yticks(ytick_positions)
+            ax_normal.set_yticklabels(ytick_labels)
+            ax_normal.set_title(f"Normal ECG | {GroupTitles[group_idx]}", fontsize=10)
+            ax_normal.grid(alpha=0.25)
+
+            ax_anom.set_yticks(ytick_positions)
+            ax_anom.set_yticklabels(ytick_labels)
+            ax_anom.set_title(f"Anomalous ECG | {GroupTitles[group_idx]}", fontsize=10)
+            ax_anom.grid(alpha=0.25)
+
+        # Column labels
         normal_lead_axes[0].set_ylabel(f"Sample {NormalIndex}")
         anom_lead_axes[0].set_ylabel(f"Sample {AnomalousIndex}")
+
+        # Show x-label only on bottom group plots
+        normal_lead_axes[-1].set_xlabel("Timestep")
+        anom_lead_axes[-1].set_xlabel("Timestep")
+
+        # One legend per column
+        normal_lead_axes[0].legend(fontsize=8, loc="upper right")
+        anom_lead_axes[0].legend(fontsize=8, loc="upper right")
+
+
 
         # ── Row 2: Attention heatmaps ─────────────────────────────
         im0 = axes[1, 0].imshow(
