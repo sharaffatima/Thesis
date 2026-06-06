@@ -354,7 +354,7 @@ class AnoFormerExplainability:
             line1 = ax.plot(
                 time_axis,
                 error,
-                color="tab:yellow",
+                color="tab:orange",
                 label="Reconstruction error",
                 linewidth=1.5,
             )
@@ -372,13 +372,13 @@ class AnoFormerExplainability:
             ax.set_xlabel("Timestep")
             ax.set_ylabel(
                 "Reconstruction error (MSE across 12 leads)",
-                color="tab:yellow",
+                color="tab:orange",
             )
             ax_attention.set_ylabel(
                 "Mean attention received",
                 color="tab:blue",
             )
-            ax.tick_params(axis="y", colors="tab:yellow")
+            ax.tick_params(axis="y", colors="tab:orange")
             ax_attention.tick_params(axis="y", colors="tab:blue")
 
             ax.grid(alpha=0.3)
