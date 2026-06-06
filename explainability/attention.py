@@ -186,8 +186,6 @@ class AnoFormerExplainability:
         else:
             attention_title = f"Block {BlockIndex}, Head {HeadIndex}"
 
-        fig, axes = plt.subplots(3, 2, figsize=(22, 22))
-
 
 
         # ============================================================
@@ -338,54 +336,59 @@ class AnoFormerExplainability:
         plt.tight_layout()
         plt.show()
 
+
         # ============================================================
         # Figure 3: Attention vs Reconstruction Error
+        # Real values, separate y-axes
         # ============================================================
 
-        fig3, axes3 = plt.subplots(1, 2, figsize=(18, 5), sharey=True)
+        fig3, axes3 = plt.subplots(1, 2, figsize=(18, 5), sharex=True)
 
-        normal_error_scaled = normal_error / (normal_error.max() + 1e-8)
-        normal_att_scaled = normal_att_imp / (normal_att_imp.max() + 1e-8)
+        def plot_attention_vs_error(ax, error, attention, title):
+            ax_attention = ax.twinx()
 
-        anom_error_scaled = anom_error / (anom_error.max() + 1e-8)
-        anom_att_scaled = anom_att_imp / (anom_att_imp.max() + 1e-8)
+            line1 = ax.plot(
+                time_axis,
+                error,
+                label="Reconstruction error",
+                linewidth=1.2,
+            )
 
-        axes3[0].plot(
-            time_axis,
-            normal_error_scaled,
-            label="Reconstruction error",
-            linewidth=1.2,
-        )
-        axes3[0].plot(
-            time_axis,
-            normal_att_scaled,
-            label="Attention importance",
-            linewidth=1.2,
-            alpha=0.8,
-        )
-        axes3[0].set_title(f"Normal ECG | Sample {NormalIndex}")
-        axes3[0].set_xlabel("Timestep")
-        axes3[0].set_ylabel("Normalized value")
-        axes3[0].legend()
-        axes3[0].grid(alpha=0.3)
+            line2 = ax_attention.plot(
+                time_axis,
+                attention,
+                label="Attention importance",
+                linewidth=1.2,
+                alpha=0.8,
+                linestyle="--",
+            )
 
-        axes3[1].plot(
-            time_axis,
-            anom_error_scaled,
-            label="Reconstruction error",
-            linewidth=1.2,
+            ax.set_title(title)
+            ax.set_xlabel("Timestep")
+            ax.set_ylabel("Reconstruction error (MSE across 12 leads)")
+            ax_attention.set_ylabel("Mean attention received")
+
+            ax.grid(alpha=0.3)
+
+            lines = line1 + line2
+            labels = [line.get_label() for line in lines]
+
+            ax.legend(lines, labels, loc="upper right")
+
+
+        plot_attention_vs_error(
+            axes3[0],
+            normal_error,
+            normal_att_imp,
+            f"Normal ECG | Sample {NormalIndex}"
         )
-        axes3[1].plot(
-            time_axis,
-            anom_att_scaled,
-            label="Attention importance",
-            linewidth=1.2,
-            alpha=0.8,
+
+        plot_attention_vs_error(
+            axes3[1],
+            anom_error,
+            anom_att_imp,
+            f"Anomalous ECG | Sample {AnomalousIndex}"
         )
-        axes3[1].set_title(f"Anomalous ECG | Sample {AnomalousIndex}")
-        axes3[1].set_xlabel("Timestep")
-        axes3[1].legend()
-        axes3[1].grid(alpha=0.3)
 
         fig3.suptitle(
             "Attention Importance vs Reconstruction Error",
