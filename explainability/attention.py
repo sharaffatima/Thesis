@@ -189,40 +189,63 @@ class AnoFormerExplainability:
 
         fig, axes = plt.subplots(3, 2, figsize=(18, 12))
 
-        # ── Row 1: Original vs reconstruction ─────────────────────
-        axes[0, 0].plot(
-            time_axis,
-            normal_original[:, LeadIndex],
-            label="Original",
-            linewidth=1.0,
-        )
-        axes[0, 0].plot(
-            time_axis,
-            normal_rec[:, LeadIndex],
-            label="Reconstructed",
-            linestyle="--",
-            linewidth=1.0,
-        )
-        axes[0, 0].set_title(f"NORMAL ECG | Sample {NormalIndex} | Lead {LeadName}")
-        axes[0, 0].set_ylabel("Amplitude")
+        
+
+        # ── Row 1: Original vs reconstruction for all 12 leads ─────────
+        ECG_LEADS = [
+            "I", "II", "III",
+            "aVR", "aVL", "aVF",
+            "V1", "V2", "V3", "V4", "V5", "V6"
+        ]
+
+        LeadOffset = 2.5  # vertical spacing between leads
+
+        for lead_idx, lead_name in enumerate(ECG_LEADS):
+            offset = lead_idx * LeadOffset
+
+            axes[0, 0].plot(
+                time_axis,
+                normal_original[:, lead_idx] + offset,
+                linewidth=0.8,
+                label="Original" if lead_idx == 0 else None,
+            )
+            axes[0, 0].plot(
+                time_axis,
+                normal_rec[:, lead_idx] + offset,
+                linestyle="--",
+                linewidth=0.8,
+                label="Reconstructed" if lead_idx == 0 else None,
+            )
+
+        axes[0, 0].set_title(f"NORMAL ECG | Sample {NormalIndex} | All 12 leads")
+        axes[0, 0].set_ylabel("ECG leads")
+        axes[0, 0].set_yticks([i * LeadOffset for i in range(len(ECG_LEADS))])
+        axes[0, 0].set_yticklabels(ECG_LEADS)
         axes[0, 0].legend()
         axes[0, 0].grid(alpha=0.3)
 
-        axes[0, 1].plot(
-            time_axis,
-            anom_original[:, LeadIndex],
-            label="Original",
-            linewidth=1.0,
-        )
-        axes[0, 1].plot(
-            time_axis,
-            anom_rec[:, LeadIndex],
-            label="Reconstructed",
-            linestyle="--",
-            linewidth=1.0,
-        )
-        axes[0, 1].set_title(f"ANOMALOUS ECG | Sample {AnomalousIndex} | Lead {LeadName}")
-        axes[0, 1].set_ylabel("Amplitude")
+
+        for lead_idx, lead_name in enumerate(ECG_LEADS):
+            offset = lead_idx * LeadOffset
+
+            axes[0, 1].plot(
+                time_axis,
+                anom_original[:, lead_idx] + offset,
+                linewidth=0.8,
+                label="Original" if lead_idx == 0 else None,
+            )
+            axes[0, 1].plot(
+                time_axis,
+                anom_rec[:, lead_idx] + offset,
+                linestyle="--",
+                linewidth=0.8,
+                label="Reconstructed" if lead_idx == 0 else None,
+            )
+
+        axes[0, 1].set_title(f"ANOMALOUS ECG | Sample {AnomalousIndex} | All 12 leads")
+        axes[0, 1].set_ylabel("ECG leads")
+        axes[0, 1].set_yticks([i * LeadOffset for i in range(len(ECG_LEADS))])
+        axes[0, 1].set_yticklabels(ECG_LEADS)
         axes[0, 1].legend()
         axes[0, 1].grid(alpha=0.3)
 
