@@ -683,8 +683,74 @@ class TranADExplainability:
             AttMatrix = StoredWeights[0, HeadIndex].detach().cpu().numpy()
 
         return AttMatrix
+
+    def _aggregate_attention_matrix(
+        self,
+        AttentionMatrix: np.ndarray,
+        BlockSize: int = 10,
+        Aggregation: str = "mean_attention_mass",
+    ) -> np.ndarray:
+        """
+        Aggregates a timestep-level attention matrix into interval-level blocks.
+
+        Input:
+            AttentionMatrix: shape (T, T)
+
+        Output:
+            AggregatedMatrix: shape (NumBlocks, NumBlocks)
+
+        Recommended:
+            Aggregation = "mean_attention_mass"
+
+        Meaning:
+            Each cell [i, j] shows how much attention, on average,
+            query interval i gives to key interval j.
+        """
+
+        if AttentionMatrix.ndim != 2:
+            raise ValueError("AttentionMatrix must have shape (T, T).")
+
+        if AttentionMatrix.shape[0] != AttentionMatrix.shape[1]:
+            raise ValueError("AttentionMatrix must be square.")
+
+        T = AttentionMatrix.shape[0]
+        NumBlocks = T // BlockSize
+
+        if NumBlocks == 0:
+            raise ValueError("BlockSize is larger than the attention matrix.")
+
+        TrimmedLength = NumBlocks * BlockSize
+        TrimmedMatrix = AttentionMatrix[:TrimmedLength, :TrimmedLength]
+
+        AggregatedMatrix = np.zeros((NumBlocks, NumBlocks), dtype=np.float32)
+
+        for QueryBlockIndex in range(NumBlocks):
+            for KeyBlockIndex in range(NumBlocks):
+                Block = TrimmedMatrix[
+                    QueryBlockIndex * BlockSize:(QueryBlockIndex + 1) * BlockSize,
+                    KeyBlockIndex * BlockSize:(KeyBlockIndex + 1) * BlockSize,
+                ]
+
+                if Aggregation == "mean_attention_mass":
+                    # For each query timestep, sum attention going to this key interval.
+                    # Then average across query timesteps.
+                    AggregatedMatrix[QueryBlockIndex, KeyBlockIndex] = Block.sum(axis=1).mean()
+
+                elif Aggregation == "mean_value":
+                    AggregatedMatrix[QueryBlockIndex, KeyBlockIndex] = Block.mean()
+
+                elif Aggregation == "sum":
+                    AggregatedMatrix[QueryBlockIndex, KeyBlockIndex] = Block.sum()
+
+                else:
+                    raise ValueError(
+                        "Aggregation must be 'mean_attention_mass', 'mean_value', or 'sum'."
+                    )
+
+        return AggregatedMatrix 
     
-    
+
+
 
     def GetTranADReconstructionErrorOverTime(
         self,
@@ -727,6 +793,10 @@ class TranADExplainability:
         LayerIndex: int = 0,
         HeadIndex: int | None = None,
         Percentile: float = 99.0,
+        UseIntervalHeatmap: bool = True,
+        BlockSize: int = 10,
+        Aggregation: str = "mean_attention_mass",
+        SamplingRate: int = 100,
     ) -> None:
 
         ECG_LEADS = [
@@ -784,11 +854,49 @@ class TranADExplainability:
 
         fig1, axes1 = plt.subplots(4, 2, figsize=(22, 12), sharex=True)
 
-        LeadOffset = 2.5
+        ECG_LEADS = [
+            "I", "II", "III",
+            "aVR", "aVL", "aVF",
+            "V1", "V2", "V3",
+            "V4", "V5", "V6"
+        ]
+
+        LeadGroups = [
+            [0, 1, 2],
+            [3, 4, 5],
+            [6, 7, 8],
+            [9, 10, 11],
+        ]
+
+        GroupTitles = [
+            "Leads I, II, III",
+            "Leads aVR, aVL, aVF",
+            "Leads V1, V2, V3",
+            "Leads V4, V5, V6",
+        ]
 
         for group_idx, lead_group in enumerate(LeadGroups):
             ax_normal = axes1[group_idx, 0]
             ax_anom = axes1[group_idx, 1]
+
+            group_values = []
+
+            for lead_idx in lead_group:
+                group_values.extend([
+                    normal_original[:, lead_idx],
+                    normal_rec[:, lead_idx],
+                    anom_original[:, lead_idx],
+                    anom_rec[:, lead_idx],
+                ])
+
+            group_values = np.concatenate(group_values)
+
+            # robust range
+            group_low = np.percentile(group_values, 1)
+            group_high = np.percentile(group_values, 99)
+            group_range = group_high - group_low
+
+            LeadOffset = max(group_range * 1.4, 1.5)
 
             for local_idx, lead_idx in enumerate(lead_group):
                 offset = (len(lead_group) - 1 - local_idx) * LeadOffset
@@ -826,17 +934,22 @@ class TranADExplainability:
                 for i in range(len(lead_group))
             ]
 
-            ytick_labels = [ECG_LEADS[lead_idx] for lead_idx in lead_group]
+            ytick_labels = [
+                ECG_LEADS[lead_idx]
+                for lead_idx in lead_group
+            ]
 
-            ax_normal.set_yticks(ytick_positions)
-            ax_normal.set_yticklabels(ytick_labels)
+            y_min = -0.75 * LeadOffset
+            y_max = (len(lead_group) - 1) * LeadOffset + 0.75 * LeadOffset
+
+            for ax in [ax_normal, ax_anom]:
+                ax.set_yticks(ytick_positions)
+                ax.set_yticklabels(ytick_labels)
+                ax.set_ylim(y_min, y_max)
+                ax.grid(alpha=0.25)
+
             ax_normal.set_title(f"Normal ECG | {GroupTitles[group_idx]}", fontsize=10)
-            ax_normal.grid(alpha=0.25)
-
-            ax_anom.set_yticks(ytick_positions)
-            ax_anom.set_yticklabels(ytick_labels)
             ax_anom.set_title(f"Anomalous ECG | {GroupTitles[group_idx]}", fontsize=10)
-            ax_anom.grid(alpha=0.25)
 
         axes1[0, 0].legend(fontsize=8, loc="upper right")
         axes1[0, 1].legend(fontsize=8, loc="upper right")
@@ -861,35 +974,89 @@ class TranADExplainability:
 
         fig2, axes2 = plt.subplots(1, 2, figsize=(18, 6))
 
+        NormalHeatmap = normal_att
+        AnomalousHeatmap = anom_att
+
+        if UseIntervalHeatmap:
+            NormalHeatmap = self._aggregate_attention_matrix(
+                AttentionMatrix=normal_att,
+                BlockSize=BlockSize,
+                Aggregation=Aggregation,
+            )
+
+            AnomalousHeatmap = self._aggregate_attention_matrix(
+                AttentionMatrix=anom_att,
+                BlockSize=BlockSize,
+                Aggregation=Aggregation,
+            )
+
         shared_vmax = max(
-            np.percentile(normal_att, Percentile),
-            np.percentile(anom_att, Percentile),
+            np.percentile(NormalHeatmap, Percentile),
+            np.percentile(AnomalousHeatmap, Percentile),
         )
 
         im0 = axes2[0].imshow(
-            normal_att,
+            NormalHeatmap,
             aspect="auto",
             cmap="viridis",
             interpolation="nearest",
             vmin=0,
             vmax=shared_vmax,
         )
-        axes2[0].set_title(f"Normal ECG | Attention Heatmap | {attention_title}")
-        axes2[0].set_xlabel("Key timestep")
-        axes2[0].set_ylabel("Query timestep")
-        fig2.colorbar(im0, ax=axes2[0], fraction=0.046, pad=0.04)
 
         im1 = axes2[1].imshow(
-            anom_att,
+            AnomalousHeatmap,
             aspect="auto",
             cmap="viridis",
             interpolation="nearest",
             vmin=0,
             vmax=shared_vmax,
         )
-        axes2[1].set_title(f"Anomalous ECG | Attention Heatmap | {attention_title}")
-        axes2[1].set_xlabel("Key timestep")
-        axes2[1].set_ylabel("Query timestep")
+
+        if UseIntervalHeatmap:
+            NumIntervals = NormalHeatmap.shape[0]
+
+            TickStep = max(1, NumIntervals // 10)
+            TickPositions = list(range(0, NumIntervals, TickStep))
+
+            TickLabels = [
+                f"{pos * BlockSize / SamplingRate:.1f}s"
+                for pos in TickPositions
+            ]
+
+            axes2[0].set_xticks(TickPositions)
+            axes2[0].set_yticks(TickPositions)
+            axes2[0].set_xticklabels(TickLabels, rotation=45, ha="right")
+            axes2[0].set_yticklabels(TickLabels)
+
+            axes2[1].set_xticks(TickPositions)
+            axes2[1].set_yticks(TickPositions)
+            axes2[1].set_xticklabels(TickLabels, rotation=45, ha="right")
+            axes2[1].set_yticklabels(TickLabels)
+
+            x_label = f"Key interval ({BlockSize / SamplingRate:.2f}s blocks)"
+            y_label = f"Query interval ({BlockSize / SamplingRate:.2f}s blocks)"
+            heatmap_type = f"Interval-level attention heatmap ({Aggregation}, {BlockSize} samples)"
+        else:
+            x_label = "Key timestep"
+            y_label = "Query timestep"
+            heatmap_type = "Timestep-level attention heatmap"
+
+        axes2[0].set_title(
+            f"Normal ECG | Attention Heatmap | {Component}, Layer {LayerIndex}"
+            + (f", Head {HeadIndex}" if HeadIndex is not None else ", all heads averaged")
+        )
+        axes2[0].set_xlabel(x_label)
+        axes2[0].set_ylabel(y_label)
+
+        axes2[1].set_title(
+            f"Anomalous ECG | Attention Heatmap | {Component}, Layer {LayerIndex}"
+            + (f", Head {HeadIndex}" if HeadIndex is not None else ", all heads averaged")
+        )
+        axes2[1].set_xlabel(x_label)
+        axes2[1].set_ylabel(y_label)
+
+        fig2.colorbar(im0, ax=axes2[0], fraction=0.046, pad=0.04)
         fig2.colorbar(im1, ax=axes2[1], fraction=0.046, pad=0.04)
 
         fig2.suptitle(
