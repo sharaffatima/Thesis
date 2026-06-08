@@ -77,19 +77,26 @@ class AnoFormerExplainability:
     def _aggregate_attention_matrix(
         self,
         AttentionMatrix: np.ndarray,
-        BlockSize: int = 100,
-        Aggregation: str = "mean",
+        BlockSize: int = 10,
+        Aggregation: str = "mean_attention_mass",
     ) -> np.ndarray:
         """
         Aggregates a timestep-level attention matrix into interval-level blocks.
 
-        Example:
-            Input:  (1000, 1000)
-            Output: (10, 10) if BlockSize = 100
+        Input:
+            AttentionMatrix: shape (T, T)
 
-        For PTB-XL sampled at 100 Hz:
-            BlockSize = 100 corresponds to 1 second.
+        Output:
+            AggregatedMatrix: shape (NumBlocks, NumBlocks)
+
+        Recommended:
+            Aggregation = "mean_attention_mass"
+
+        Meaning:
+            Each cell [i, j] shows how much attention, on average,
+            query interval i gives to key interval j.
         """
+
 
         if AttentionMatrix.ndim != 2:
             raise ValueError("AttentionMatrix must have shape (T, T).")
@@ -116,6 +123,7 @@ class AnoFormerExplainability:
             dtype=np.float32,
         )
 
+
         for QueryBlockIndex in range(NumBlocks):
             for KeyBlockIndex in range(NumBlocks):
                 Block = TrimmedMatrix[
@@ -123,14 +131,26 @@ class AnoFormerExplainability:
                     KeyBlockIndex * BlockSize:(KeyBlockIndex + 1) * BlockSize,
                 ]
 
-                if Aggregation == "mean":
+                if Aggregation == "mean_attention_mass":
+                    # For each query timestep, sum attention going to this key interval.
+                    # Then average across query timesteps.
+                    AggregatedMatrix[QueryBlockIndex, KeyBlockIndex] = Block.sum(axis=1).mean()
+
+                elif Aggregation == "mean_value":
                     AggregatedMatrix[QueryBlockIndex, KeyBlockIndex] = Block.mean()
+
                 elif Aggregation == "sum":
                     AggregatedMatrix[QueryBlockIndex, KeyBlockIndex] = Block.sum()
+
                 else:
-                    raise ValueError("Aggregation must be either 'mean' or 'sum'.")
+                    raise ValueError(
+                        "Aggregation must be 'mean_attention_mass', 'mean_value', or 'sum'."
+                    )
 
         return AggregatedMatrix
+    
+
+
     # ──────────────────────────────────────────────────────────
     def GetAttentionImportance(
         self,
@@ -198,8 +218,9 @@ class AnoFormerExplainability:
         HeadIndex: int | None = None,
         Percentile: float = 99.0,
         UseIntervalHeatmap: bool = True,
-        BlockSize: int = 100,
-        Aggregation: str = "mean",
+        BlockSize: int = 10,
+        Aggregation: str = "mean_attention_mass",
+        SamplingRate: int = 100,
     ) -> None:
         """
         Compares attention and reconstruction behavior for one normal
@@ -392,23 +413,26 @@ class AnoFormerExplainability:
         if UseIntervalHeatmap:
             NumIntervals = NormalHeatmap.shape[0]
 
-            IntervalLabels = [
-                f"{i}-{i + 1}s"
-                for i in range(NumIntervals)
+            TickStep = max(1, NumIntervals // 10)
+            TickPositions = list(range(0, NumIntervals, TickStep))
+
+            TickLabels = [
+                f"{pos * BlockSize / SamplingRate:.1f}s"
+                for pos in TickPositions
             ]
 
-            axes2[0].set_xticks(range(NumIntervals))
-            axes2[0].set_yticks(range(NumIntervals))
-            axes2[0].set_xticklabels(IntervalLabels, rotation=45, ha="right")
-            axes2[0].set_yticklabels(IntervalLabels)
+            axes2[0].set_xticks(TickPositions)
+            axes2[0].set_yticks(TickPositions)
+            axes2[0].set_xticklabels(TickLabels, rotation=45, ha="right")
+            axes2[0].set_yticklabels(TickLabels)
 
-            axes2[1].set_xticks(range(NumIntervals))
-            axes2[1].set_yticks(range(NumIntervals))
-            axes2[1].set_xticklabels(IntervalLabels, rotation=45, ha="right")
-            axes2[1].set_yticklabels(IntervalLabels)
+            axes2[1].set_xticks(TickPositions)
+            axes2[1].set_yticks(TickPositions)
+            axes2[1].set_xticklabels(TickLabels, rotation=45, ha="right")
+            axes2[1].set_yticklabels(TickLabels)
 
-            x_label = "Key interval"
-            y_label = "Query interval"
+            x_label = f"Key interval ({BlockSize / SamplingRate:.2f}s blocks)"
+            y_label = f"Query interval ({BlockSize / SamplingRate:.2f}s blocks)"
             heatmap_type = f"Interval-level attention heatmap ({Aggregation}, {BlockSize} samples)"
         else:
             x_label = "Key timestep"
