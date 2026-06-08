@@ -74,6 +74,64 @@ class AnoFormerExplainability:
         return AttMatrix
 
     # ──────────────────────────────────────────────────────────
+    def _aggregate_attention_matrix(
+        self,
+        AttentionMatrix: np.ndarray,
+        BlockSize: int = 100,
+        Aggregation: str = "mean",
+    ) -> np.ndarray:
+        """
+        Aggregates a timestep-level attention matrix into interval-level blocks.
+
+        Example:
+            Input:  (1000, 1000)
+            Output: (10, 10) if BlockSize = 100
+
+        For PTB-XL sampled at 100 Hz:
+            BlockSize = 100 corresponds to 1 second.
+        """
+
+        if AttentionMatrix.ndim != 2:
+            raise ValueError("AttentionMatrix must have shape (T, T).")
+
+        T = AttentionMatrix.shape[0]
+
+        if AttentionMatrix.shape[0] != AttentionMatrix.shape[1]:
+            raise ValueError("AttentionMatrix must be square.")
+
+        NumBlocks = T // BlockSize
+
+        if NumBlocks == 0:
+            raise ValueError("BlockSize is larger than the attention matrix.")
+
+        TrimmedLength = NumBlocks * BlockSize
+
+        TrimmedMatrix = AttentionMatrix[
+            :TrimmedLength,
+            :TrimmedLength
+        ]
+
+        AggregatedMatrix = np.zeros(
+            (NumBlocks, NumBlocks),
+            dtype=np.float32,
+        )
+
+        for QueryBlockIndex in range(NumBlocks):
+            for KeyBlockIndex in range(NumBlocks):
+                Block = TrimmedMatrix[
+                    QueryBlockIndex * BlockSize:(QueryBlockIndex + 1) * BlockSize,
+                    KeyBlockIndex * BlockSize:(KeyBlockIndex + 1) * BlockSize,
+                ]
+
+                if Aggregation == "mean":
+                    AggregatedMatrix[QueryBlockIndex, KeyBlockIndex] = Block.mean()
+                elif Aggregation == "sum":
+                    AggregatedMatrix[QueryBlockIndex, KeyBlockIndex] = Block.sum()
+                else:
+                    raise ValueError("Aggregation must be either 'mean' or 'sum'.")
+
+        return AggregatedMatrix
+    # ──────────────────────────────────────────────────────────
     def GetAttentionImportance(
         self,
         TimeSeriesWindow: torch.Tensor,
@@ -136,11 +194,12 @@ class AnoFormerExplainability:
         DatasetForInverseNorm,
         NormalIndex: int,
         AnomalousIndex: int,
-        LeadIndex: int = 1,
-        LeadName: str = "II",
         BlockIndex: int = 0,
         HeadIndex: int | None = None,
         Percentile: float = 99.0,
+        UseIntervalHeatmap: bool = True,
+        BlockSize: int = 100,
+        Aggregation: str = "mean",
     ) -> None:
         """
         Compares attention and reconstruction behavior for one normal
@@ -291,126 +350,89 @@ class AnoFormerExplainability:
 
         fig2, axes2 = plt.subplots(1, 2, figsize=(18, 6))
 
-        shared_vmax = max(
-            np.percentile(normal_att, Percentile),
-            np.percentile(anom_att, Percentile),
-        )
+        NormalHeatmap = normal_att
+        AnomalousHeatmap = anom_att
 
-        if HeadIndex is None:
-            attention_title = f"Block {BlockIndex}, all heads averaged"
-        else:
-            attention_title = f"Block {BlockIndex}, Head {HeadIndex}"
+        if UseIntervalHeatmap:
+            NormalHeatmap = self._aggregate_attention_matrix(
+                AttentionMatrix=normal_att,
+                BlockSize=BlockSize,
+                Aggregation=Aggregation,
+            )
+
+            AnomalousHeatmap = self._aggregate_attention_matrix(
+                AttentionMatrix=anom_att,
+                BlockSize=BlockSize,
+                Aggregation=Aggregation,
+            )
+
+        shared_vmax = max(
+            np.percentile(NormalHeatmap, Percentile),
+            np.percentile(AnomalousHeatmap, Percentile),
+        )
 
         im0 = axes2[0].imshow(
-            normal_att,
+            NormalHeatmap,
             aspect="auto",
             cmap="viridis",
             interpolation="nearest",
             vmin=0,
             vmax=shared_vmax,
         )
-        axes2[0].set_title(f"Normal ECG | Attention Heatmap | {attention_title}")
-        axes2[0].set_xlabel("Key timestep")
-        axes2[0].set_ylabel("Query timestep")
-        fig2.colorbar(im0, ax=axes2[0], fraction=0.046, pad=0.04)
 
         im1 = axes2[1].imshow(
-            anom_att,
+            AnomalousHeatmap,
             aspect="auto",
             cmap="viridis",
             interpolation="nearest",
             vmin=0,
             vmax=shared_vmax,
         )
-        axes2[1].set_title(f"Anomalous ECG | Attention Heatmap | {attention_title}")
-        axes2[1].set_xlabel("Key timestep")
-        axes2[1].set_ylabel("Query timestep")
+
+        if UseIntervalHeatmap:
+            NumIntervals = NormalHeatmap.shape[0]
+
+            IntervalLabels = [
+                f"{i}-{i + 1}s"
+                for i in range(NumIntervals)
+            ]
+
+            axes2[0].set_xticks(range(NumIntervals))
+            axes2[0].set_yticks(range(NumIntervals))
+            axes2[0].set_xticklabels(IntervalLabels, rotation=45, ha="right")
+            axes2[0].set_yticklabels(IntervalLabels)
+
+            axes2[1].set_xticks(range(NumIntervals))
+            axes2[1].set_yticks(range(NumIntervals))
+            axes2[1].set_xticklabels(IntervalLabels, rotation=45, ha="right")
+            axes2[1].set_yticklabels(IntervalLabels)
+
+            x_label = "Key interval"
+            y_label = "Query interval"
+            heatmap_type = f"Interval-level attention heatmap ({Aggregation}, {BlockSize} samples)"
+        else:
+            x_label = "Key timestep"
+            y_label = "Query timestep"
+            heatmap_type = "Timestep-level attention heatmap"
+
+        axes2[0].set_title(f"Normal ECG | {heatmap_type}")
+        axes2[0].set_xlabel(x_label)
+        axes2[0].set_ylabel(y_label)
+
+        axes2[1].set_title(f"Anomalous ECG | {heatmap_type}")
+        axes2[1].set_xlabel(x_label)
+        axes2[1].set_ylabel(y_label)
+
+        fig2.colorbar(im0, ax=axes2[0], fraction=0.046, pad=0.04)
         fig2.colorbar(im1, ax=axes2[1], fraction=0.046, pad=0.04)
 
         fig2.suptitle(
-            f"Attention Heatmaps | Normal Sample {NormalIndex} vs Anomalous Sample {AnomalousIndex}",
+            f"AnoFormer Attention Heatmaps | Normal Sample {NormalIndex} vs Anomalous Sample {AnomalousIndex}",
             fontsize=16,
             fontweight="bold",
         )
 
         plt.tight_layout()
-        plt.show()
-
-
-        # ============================================================
-        # Figure 3: Attention vs Reconstruction Error
-        # Real values, separate y-axes
-        # ============================================================
-
-        fig3, axes3 = plt.subplots(
-            1, 2,
-            figsize=(20, 5),
-            sharex=True,
-        )
-
-        def plot_attention_vs_error(ax, error, attention, title):
-            ax_attention = ax.twinx()
-
-            line1 = ax.plot(
-                time_axis,
-                error,
-                color="tab:orange",
-                label="Reconstruction error",
-                linewidth=1.5,
-            )
-
-            line2 = ax_attention.plot(
-                time_axis,
-                attention,
-                color="tab:blue",
-                label="Attention importance",
-                linewidth=1.5,
-                linestyle="--",
-            )
-
-            ax.set_title(title)
-            ax.set_xlabel("Timestep")
-            ax.set_ylabel(
-                "Reconstruction error (MSE across 12 leads)",
-                color="tab:orange",
-            )
-            ax_attention.set_ylabel(
-                "Mean attention received",
-                color="tab:blue",
-            )
-            ax.tick_params(axis="y", colors="tab:orange")
-            ax_attention.tick_params(axis="y", colors="tab:blue")
-
-            ax.grid(alpha=0.3)
-
-            lines = line1 + line2
-            labels = [line.get_label() for line in lines]
-
-            ax.legend(lines, labels, loc="upper right")
-
-
-        plot_attention_vs_error(
-            axes3[0],
-            normal_error,
-            normal_att_imp,
-            f"Normal ECG | Sample {NormalIndex}"
-        )
-
-        plot_attention_vs_error(
-            axes3[1],
-            anom_error,
-            anom_att_imp,
-            f"Anomalous ECG | Sample {AnomalousIndex}"
-        )
-
-        fig3.suptitle(
-            "Temporal Attention and Reconstruction Error",
-            fontsize=16,
-            fontweight="bold",
-        )
-
-        plt.tight_layout()
-        fig3.subplots_adjust(wspace=0.35)
         plt.show()
 
 
