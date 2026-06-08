@@ -269,7 +269,7 @@ class AnoFormerExplainability:
 
 
         # ============================================================
-        # Figure 1: Original vs Reconstruction for all 12 leads
+        # Figure 1: Original vs Reconstruction
         # ============================================================
 
         fig1, axes1 = plt.subplots(4, 2, figsize=(22, 12), sharex=True)
@@ -294,15 +294,44 @@ class AnoFormerExplainability:
             "Leads V4, V5, V6",
         ]
 
-        LeadOffset = 2.5
-
         for group_idx, lead_group in enumerate(LeadGroups):
             ax_normal = axes1[group_idx, 0]
             ax_anom = axes1[group_idx, 1]
 
+
+            # Compute adaptive vertical spacing for this group
+            # using BOTH normal and anomalous ECGs.
+
+            group_values = []
+
+            for lead_idx in lead_group:
+                group_values.extend([
+                    normal_original[:, lead_idx],
+                    normal_rec[:, lead_idx],
+                    anom_original[:, lead_idx],
+                    anom_rec[:, lead_idx],
+                ])
+
+            group_values = np.concatenate(group_values)
+
+            # Robust amplitude range, avoids single extreme point dominating too much
+            group_low = np.percentile(group_values, 1)
+            group_high = np.percentile(group_values, 99)
+            group_range = group_high - group_low
+
+            # Minimum spacing so very flat groups still look readable
+            LeadOffset = max(group_range * 1.4, 1.5)
+
+
+            # Plot normal and anomalous side by side
+
             for local_idx, lead_idx in enumerate(lead_group):
+                lead_name = ECG_LEADS[lead_idx]
+
+                # Reverse order so first lead appears at the top
                 offset = (len(lead_group) - 1 - local_idx) * LeadOffset
 
+                # Normal ECG
                 ax_normal.plot(
                     time_axis,
                     normal_original[:, lead_idx] + offset,
@@ -317,6 +346,7 @@ class AnoFormerExplainability:
                     label="Reconstructed" if group_idx == 0 and local_idx == 0 else None,
                 )
 
+                # Anomalous ECG
                 ax_anom.plot(
                     time_axis,
                     anom_original[:, lead_idx] + offset,
@@ -331,22 +361,30 @@ class AnoFormerExplainability:
                     label="Reconstructed" if group_idx == 0 and local_idx == 0 else None,
                 )
 
+
+            # Same y-ticks and same y-limits for normal and anomalous group
+
             ytick_positions = [
                 (len(lead_group) - 1 - i) * LeadOffset
                 for i in range(len(lead_group))
             ]
 
-            ytick_labels = [ECG_LEADS[lead_idx] for lead_idx in lead_group]
+            ytick_labels = [
+                ECG_LEADS[lead_idx]
+                for lead_idx in lead_group
+            ]
 
-            ax_normal.set_yticks(ytick_positions)
-            ax_normal.set_yticklabels(ytick_labels)
+            y_min = -0.75 * LeadOffset
+            y_max = (len(lead_group) - 1) * LeadOffset + 0.75 * LeadOffset
+
+            for ax in [ax_normal, ax_anom]:
+                ax.set_yticks(ytick_positions)
+                ax.set_yticklabels(ytick_labels)
+                ax.set_ylim(y_min, y_max)
+                ax.grid(alpha=0.25)
+
             ax_normal.set_title(f"Normal ECG | {GroupTitles[group_idx]}", fontsize=10)
-            ax_normal.grid(alpha=0.25)
-
-            ax_anom.set_yticks(ytick_positions)
-            ax_anom.set_yticklabels(ytick_labels)
             ax_anom.set_title(f"Anomalous ECG | {GroupTitles[group_idx]}", fontsize=10)
-            ax_anom.grid(alpha=0.25)
 
         axes1[0, 0].legend(fontsize=8, loc="upper right")
         axes1[0, 1].legend(fontsize=8, loc="upper right")
