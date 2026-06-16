@@ -1140,4 +1140,86 @@ class TranADExplainability:
         fig3.subplots_adjust(wspace=0.4)
         plt.tight_layout()
         plt.show()
-    
+
+        
+
+    def ShowTrainingHistory(self) -> None:
+            """
+            Visualisiert Verlauf von Gesamtverlust und φ über alle Epochen.
+            / Visualizes history of total loss and φ over all epochs.
+            """
+            History = self.Model.TrainingHistory
+            if not History["TotalLoss"]:                       # Noch kein Training / No training yet
+                print("No training history available.")
+                return
+
+            Epochs = range(1, len(History["TotalLoss"]) + 1)  # Epochen-Achse / Epoch axis
+
+            fig, Axes = plt.subplots(1, 2, figsize=(13, 4))
+
+            # Links: Loss / Left: Loss
+            Axes[0].plot(Epochs, History["TotalLoss"], linewidth=1.5, color="steelblue", label="TranAD Loss")
+            Axes[0].set_title(" Training Loss")
+            Axes[0].set_xlabel("Epoch")
+            Axes[0].set_ylabel("Loss")
+            Axes[0].legend()
+            Axes[0].grid(alpha=0.3)
+
+            # Rechts: φ / Right: φ
+            Axes[1].plot(Epochs, History["FocusScore"], linewidth=1.5, color="darkorange", label="φ (Focus Score)")
+            Axes[1].set_title("Focus Score φ per Epoch")
+            Axes[1].set_xlabel(" Epoch")
+            Axes[1].set_ylabel("φ")
+            Axes[1].legend()
+            Axes[1].grid(alpha=0.3)
+
+            plt.suptitle("TranAD – Training History", fontweight="bold")
+            plt.tight_layout()
+            plt.show()
+
+        # ──────────────────────────────────────────────────────────────
+    def ShowFocusScoreEffect(
+        self,
+        TimeSeriesWindow: torch.Tensor,        # (1, T, F)
+        FocusScoreList:   Optional[List[float]] = None,  # Zu vergleichende φ-Werte / φ values to compare
+    ) -> None:
+        """
+        Zeigt wie verschiedene φ-Werte den kombinierten Loss gewichten.
+        / Shows how different φ values weight the combined loss.
+        L(φ) = (1/φ)·E1 + φ·E2 – für jedes φ eine Kurve / one curve per φ.
+        """
+        if FocusScoreList is None:
+            FocusScoreList = [0.5, 1.0, 2.0, 5.0, 10.0, 30.0]  # Standard-Vergleichswerte / Default values
+
+        self.Model.Network.eval()
+        with torch.no_grad():
+            InputTensor = TimeSeriesWindow.to(self.Device)
+            Rec1, Rec2  = self.Model.Network(InputTensor)
+            Error1 = ((Rec1 - InputTensor) ** 2).mean(dim=-1)[0].cpu().numpy()  # (T,) Phase-1-Fehler / Phase-1 error
+            Error2 = ((Rec2 - InputTensor) ** 2).mean(dim=-1)[0].cpu().numpy()  # (T,) Phase-2-Fehler / Phase-2 error
+
+        TimeAxis = np.arange(len(Error1))  # Zeitachse / Time axis
+
+        fig, Axes = plt.subplots(1, 2, figsize=(14, 5))
+
+        # Links: Rohfehler beider Phasen / Left: raw errors of both phases
+        Axes[0].plot(TimeAxis, Error1, color="royalblue", linewidth=1.5, label=" Phase-1 error")
+        Axes[0].plot(TimeAxis, Error2, color="crimson",   linewidth=1.5, label="P Phase-2 error")
+        Axes[0].set_title(" Raw Errors Phase 1 vs. Phase 2")
+        Axes[0].set_xlabel("Timestep")
+        Axes[0].legend()
+        Axes[0].grid(alpha=0.3)
+
+        # Rechts: kombinierter Loss für jedes φ / Right: combined loss for each φ
+        for Phi in FocusScoreList:
+            CombinedLoss = Error1 / max(Phi, 1e-6) + Error2 * Phi  # L(φ) = E1/φ + φ·E2
+            Axes[1].plot(TimeAxis, CombinedLoss, linewidth=1.2, label=f"φ={Phi:.1f}")
+        Axes[1].set_title(" Combined TranAD Loss for various φ")
+        Axes[1].set_xlabel("Timestep")
+        Axes[1].set_ylabel("L = E₁/φ + φ·E₂")
+        Axes[1].legend(fontsize=8)
+        Axes[1].grid(alpha=0.3)
+
+        plt.suptitle(" Effect of Focus Score φ", fontweight="bold")
+        plt.tight_layout()
+        plt.show()
