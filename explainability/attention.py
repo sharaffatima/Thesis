@@ -404,104 +404,10 @@ class AnoFormerExplainability:
 
 
         # ============================================================
-        # Figure 2: Attention Heatmaps
+        # Figure 2: Attention vs Reconstruction Error
         # ============================================================
 
-        fig2, axes2 = plt.subplots(1, 2, figsize=(18, 6))
-
-        NormalHeatmap = normal_att
-        AnomalousHeatmap = anom_att
-
-        if UseIntervalHeatmap:
-            NormalHeatmap = self._aggregate_attention_matrix(
-                AttentionMatrix=normal_att,
-                BlockSize=BlockSize,
-                Aggregation=Aggregation,
-            )
-
-            AnomalousHeatmap = self._aggregate_attention_matrix(
-                AttentionMatrix=anom_att,
-                BlockSize=BlockSize,
-                Aggregation=Aggregation,
-            )
-
-        shared_vmax = max(
-            np.percentile(NormalHeatmap, Percentile),
-            np.percentile(AnomalousHeatmap, Percentile),
-        )
-
-        im0 = axes2[0].imshow(
-            NormalHeatmap,
-            aspect="auto",
-            cmap="viridis",
-            interpolation="nearest",
-            vmin=0,
-            vmax=shared_vmax,
-        )
-
-        im1 = axes2[1].imshow(
-            AnomalousHeatmap,
-            aspect="auto",
-            cmap="viridis",
-            interpolation="nearest",
-            vmin=0,
-            vmax=shared_vmax,
-        )
-
-        if UseIntervalHeatmap:
-            NumIntervals = NormalHeatmap.shape[0]
-
-            TickStep = max(1, NumIntervals // 10)
-            TickPositions = list(range(0, NumIntervals, TickStep))
-
-            TickLabels = [
-                f"{pos * BlockSize / SamplingRate:.1f}s"
-                for pos in TickPositions
-            ]
-
-            axes2[0].set_xticks(TickPositions)
-            axes2[0].set_yticks(TickPositions)
-            axes2[0].set_xticklabels(TickLabels, rotation=45, ha="right")
-            axes2[0].set_yticklabels(TickLabels)
-
-            axes2[1].set_xticks(TickPositions)
-            axes2[1].set_yticks(TickPositions)
-            axes2[1].set_xticklabels(TickLabels, rotation=45, ha="right")
-            axes2[1].set_yticklabels(TickLabels)
-
-            x_label = f"Key interval ({BlockSize / SamplingRate:.2f}s blocks)"
-            y_label = f"Query interval ({BlockSize / SamplingRate:.2f}s blocks)"
-            heatmap_type = f"Interval-level attention heatmap ({Aggregation}, {BlockSize} samples)"
-        else:
-            x_label = "Key timestep"
-            y_label = "Query timestep"
-            heatmap_type = "Timestep-level attention heatmap"
-
-        axes2[0].set_title(f"Normal ECG | {heatmap_type}")
-        axes2[0].set_xlabel(x_label)
-        axes2[0].set_ylabel(y_label)
-
-        axes2[1].set_title(f"Anomalous ECG | {heatmap_type}")
-        axes2[1].set_xlabel(x_label)
-        axes2[1].set_ylabel(y_label)
-
-        fig2.colorbar(im0, ax=axes2[0], fraction=0.046, pad=0.04)
-        fig2.colorbar(im1, ax=axes2[1], fraction=0.046, pad=0.04)
-
-        fig2.suptitle(
-            f"AnoFormer Attention Heatmaps | Normal Sample {NormalIndex} vs Anomalous Sample {AnomalousIndex}",
-            fontsize=16,
-            fontweight="bold",
-        )
-
-        plt.tight_layout()
-        plt.show()
-
-        # ============================================================
-        # Figure 3: Attention vs Reconstruction Error
-        # ============================================================
-
-        fig3, axes3 = plt.subplots(1, 2, figsize=(20, 5), sharex=True)
+        fig2, axes2 = plt.subplots(1, 2, figsize=(20, 5), sharex=True)
 
         def plot_attention_vs_error(ax, error, attention, title):
             ax_attention = ax.twinx()
@@ -548,30 +454,123 @@ class AnoFormerExplainability:
 
 
         plot_attention_vs_error(
-            axes3[0],
+            axes2[0],
             normal_error,
             normal_att_imp,
             f"Normal ECG | Sample {NormalIndex}",
         )
 
         plot_attention_vs_error(
-            axes3[1],
+            axes2[1],
             anom_error,
             anom_att_imp,
             f"Anomalous ECG | Sample {AnomalousIndex}",
         )
 
-        fig3.suptitle(
+        fig2.suptitle(
             "Temporal Attention and Reconstruction Error",
             fontsize=16,
             fontweight="bold",
         )
 
-        fig3.subplots_adjust(wspace=0.4)
+        fig2.subplots_adjust(wspace=0.4)
 
         plt.tight_layout()
         plt.show()
 
+        # ============================================================
+        # Figure 3: Attention Heatmaps
+        # ============================================================
+
+        fig3, axes3 = plt.subplots(1, 2, figsize=(18, 6))
+
+        NormalHeatmap = normal_att
+        AnomalousHeatmap = anom_att
+
+        if UseIntervalHeatmap:
+            NormalHeatmap = self._aggregate_attention_matrix(
+                AttentionMatrix=normal_att,
+                BlockSize=BlockSize,
+                Aggregation=Aggregation,
+            )
+
+            AnomalousHeatmap = self._aggregate_attention_matrix(
+                AttentionMatrix=anom_att,
+                BlockSize=BlockSize,
+                Aggregation=Aggregation,
+            )
+
+        shared_vmax = max(
+            np.percentile(NormalHeatmap, Percentile),
+            np.percentile(AnomalousHeatmap, Percentile),
+        )
+
+        im0 = axes3[0].imshow(
+            NormalHeatmap,
+            aspect="auto",
+            cmap="viridis",
+            interpolation="nearest",
+            vmin=0,
+            vmax=shared_vmax,
+        )
+
+        im1 = axes3[1].imshow(
+            AnomalousHeatmap,
+            aspect="auto",
+            cmap="viridis",
+            interpolation="nearest",
+            vmin=0,
+            vmax=shared_vmax,
+        )
+
+        if UseIntervalHeatmap:
+            NumIntervals = NormalHeatmap.shape[0]
+
+            TickStep = max(1, NumIntervals // 10)
+            TickPositions = list(range(0, NumIntervals, TickStep))
+
+            TickLabels = [
+                f"{pos * BlockSize / SamplingRate:.1f}s"
+                for pos in TickPositions
+            ]
+
+            axes3[0].set_xticks(TickPositions)
+            axes3[0].set_yticks(TickPositions)
+            axes3[0].set_xticklabels(TickLabels, rotation=45, ha="right")
+            axes3[0].set_yticklabels(TickLabels)
+
+            axes3[1].set_xticks(TickPositions)
+            axes3[1].set_yticks(TickPositions)
+            axes3[1].set_xticklabels(TickLabels, rotation=45, ha="right")
+            axes3[1].set_yticklabels(TickLabels)
+
+            x_label = f"Key interval ({BlockSize / SamplingRate:.2f}s blocks)"
+            y_label = f"Query interval ({BlockSize / SamplingRate:.2f}s blocks)"
+            heatmap_type = f"Interval-level attention heatmap ({Aggregation}, {BlockSize} samples)"
+        else:
+            x_label = "Key timestep"
+            y_label = "Query timestep"
+            heatmap_type = "Timestep-level attention heatmap"
+
+        axes3[0].set_title(f"Normal ECG | {heatmap_type}")
+        axes3[0].set_xlabel(x_label)
+        axes3[0].set_ylabel(y_label)
+
+        axes3[1].set_title(f"Anomalous ECG | {heatmap_type}")
+        axes3[1].set_xlabel(x_label)
+        axes3[1].set_ylabel(y_label)
+
+        fig3.colorbar(im0, ax=axes3[0], fraction=0.046, pad=0.04)
+        fig3.colorbar(im1, ax=axes3[1], fraction=0.046, pad=0.04)
+
+        fig3.suptitle(
+            f"AnoFormer Attention Heatmaps | Normal Sample {NormalIndex} vs Anomalous Sample {AnomalousIndex}",
+            fontsize=16,
+            fontweight="bold",
+        )
+
+        plt.tight_layout()
+        plt.show()
 
     # ──────────────────────────────────────────────────────────
     def ShowTrainingHistory(self) -> None:
@@ -969,113 +968,10 @@ class TranADExplainability:
 
 
         # ============================================================
-        # Figure 2: Attention Heatmaps
+        # Figure 2: Attention vs Reconstruction Error
         # ============================================================
 
-        fig2, axes2 = plt.subplots(1, 2, figsize=(18, 6))
-
-        NormalHeatmap = normal_att
-        AnomalousHeatmap = anom_att
-
-        if UseIntervalHeatmap:
-            NormalHeatmap = self._aggregate_attention_matrix(
-                AttentionMatrix=normal_att,
-                BlockSize=BlockSize,
-                Aggregation=Aggregation,
-            )
-
-            AnomalousHeatmap = self._aggregate_attention_matrix(
-                AttentionMatrix=anom_att,
-                BlockSize=BlockSize,
-                Aggregation=Aggregation,
-            )
-
-        shared_vmax = max(
-            np.percentile(NormalHeatmap, Percentile),
-            np.percentile(AnomalousHeatmap, Percentile),
-        )
-
-        im0 = axes2[0].imshow(
-            NormalHeatmap,
-            aspect="auto",
-            cmap="viridis",
-            interpolation="nearest",
-            vmin=0,
-            vmax=shared_vmax,
-        )
-
-        im1 = axes2[1].imshow(
-            AnomalousHeatmap,
-            aspect="auto",
-            cmap="viridis",
-            interpolation="nearest",
-            vmin=0,
-            vmax=shared_vmax,
-        )
-
-        if UseIntervalHeatmap:
-            NumIntervals = NormalHeatmap.shape[0]
-
-            TickStep = max(1, NumIntervals // 10)
-            TickPositions = list(range(0, NumIntervals, TickStep))
-
-            TickLabels = [
-                f"{pos * BlockSize / SamplingRate:.1f}s"
-                for pos in TickPositions
-            ]
-
-            axes2[0].set_xticks(TickPositions)
-            axes2[0].set_yticks(TickPositions)
-            axes2[0].set_xticklabels(TickLabels, rotation=45, ha="right")
-            axes2[0].set_yticklabels(TickLabels)
-
-            axes2[1].set_xticks(TickPositions)
-            axes2[1].set_yticks(TickPositions)
-            axes2[1].set_xticklabels(TickLabels, rotation=45, ha="right")
-            axes2[1].set_yticklabels(TickLabels)
-
-            x_label = f"Key interval ({BlockSize / SamplingRate:.2f}s blocks)"
-            y_label = f"Query interval ({BlockSize / SamplingRate:.2f}s blocks)"
-            heatmap_type = f"Interval-level attention heatmap ({Aggregation}, {BlockSize} samples)"
-        else:
-            x_label = "Key timestep"
-            y_label = "Query timestep"
-            heatmap_type = "Timestep-level attention heatmap"
-
-        axes2[0].set_title(
-            f"Normal ECG | Attention Heatmap | {Component}, Layer {LayerIndex}"
-            + (f", Head {HeadIndex}" if HeadIndex is not None else ", all heads averaged")
-        )
-        axes2[0].set_xlabel(x_label)
-        axes2[0].set_ylabel(y_label)
-
-        axes2[1].set_title(
-            f"Anomalous ECG | Attention Heatmap | {Component}, Layer {LayerIndex}"
-            + (f", Head {HeadIndex}" if HeadIndex is not None else ", all heads averaged")
-        )
-        axes2[1].set_xlabel(x_label)
-        axes2[1].set_ylabel(y_label)
-
-        fig2.colorbar(im0, ax=axes2[0], fraction=0.046, pad=0.04)
-        fig2.colorbar(im1, ax=axes2[1], fraction=0.046, pad=0.04)
-
-        fig2.suptitle(
-            f"TranAD Attention Heatmaps | Normal Sample {NormalIndex} vs Anomalous Sample {AnomalousIndex}",
-            fontsize=16,
-            fontweight="bold",
-        )
-
-        plt.tight_layout()
-        plt.show()
-
-
-
-
-        # ============================================================
-        # Figure 3: Attention vs Reconstruction Error
-        # ============================================================
-
-        fig3, axes3 = plt.subplots(1, 2, figsize=(20, 5), sharex=True)
+        fig2, axes2 = plt.subplots(1, 2, figsize=(20, 5), sharex=True)
 
         def plot_attention_vs_error(ax, error, attention, title):
             ax_attention = ax.twinx()
@@ -1118,30 +1014,132 @@ class TranADExplainability:
             ax.legend(lines, labels, loc="upper right")
 
         plot_attention_vs_error(
-            axes3[0],
+            axes2[0],
             normal_error,
             normal_att_imp,
             f"Normal ECG | Sample {NormalIndex}",
         )
 
         plot_attention_vs_error(
-            axes3[1],
+            axes2[1],
             anom_error,
             anom_att_imp,
             f"Anomalous ECG | Sample {AnomalousIndex}",
         )
 
-        fig3.suptitle(
+        fig2.suptitle(
             "TranAD Temporal Attention and Reconstruction Error",
             fontsize=16,
             fontweight="bold",
         )
 
-        fig3.subplots_adjust(wspace=0.4)
+        fig2.subplots_adjust(wspace=0.4)
         plt.tight_layout()
         plt.show()
 
-        
+
+        # ============================================================
+        # Figure 3: Attention Heatmaps
+        # ============================================================
+
+        fig3, axes3 = plt.subplots(1, 2, figsize=(18, 6))
+
+        NormalHeatmap = normal_att
+        AnomalousHeatmap = anom_att
+
+        if UseIntervalHeatmap:
+            NormalHeatmap = self._aggregate_attention_matrix(
+                AttentionMatrix=normal_att,
+                BlockSize=BlockSize,
+                Aggregation=Aggregation,
+            )
+
+            AnomalousHeatmap = self._aggregate_attention_matrix(
+                AttentionMatrix=anom_att,
+                BlockSize=BlockSize,
+                Aggregation=Aggregation,
+            )
+
+        shared_vmax = max(
+            np.percentile(NormalHeatmap, Percentile),
+            np.percentile(AnomalousHeatmap, Percentile),
+        )
+
+        im0 = axes3[0].imshow(
+            NormalHeatmap,
+            aspect="auto",
+            cmap="viridis",
+            interpolation="nearest",
+            vmin=0,
+            vmax=shared_vmax,
+        )
+
+        im1 = axes3[1].imshow(
+            AnomalousHeatmap,
+            aspect="auto",
+            cmap="viridis",
+            interpolation="nearest",
+            vmin=0,
+            vmax=shared_vmax,
+        )
+
+        if UseIntervalHeatmap:
+            NumIntervals = NormalHeatmap.shape[0]
+
+            TickStep = max(1, NumIntervals // 10)
+            TickPositions = list(range(0, NumIntervals, TickStep))
+
+            TickLabels = [
+                f"{pos * BlockSize / SamplingRate:.1f}s"
+                for pos in TickPositions
+            ]
+
+            axes3[0].set_xticks(TickPositions)
+            axes3[0].set_yticks(TickPositions)
+            axes3[0].set_xticklabels(TickLabels, rotation=45, ha="right")
+            axes3[0].set_yticklabels(TickLabels)
+
+            axes3[1].set_xticks(TickPositions)
+            axes3[1].set_yticks(TickPositions)
+            axes3[1].set_xticklabels(TickLabels, rotation=45, ha="right")
+            axes3[1].set_yticklabels(TickLabels)
+
+            x_label = f"Key interval ({BlockSize / SamplingRate:.2f}s blocks)"
+            y_label = f"Query interval ({BlockSize / SamplingRate:.2f}s blocks)"
+            heatmap_type = f"Interval-level attention heatmap ({Aggregation}, {BlockSize} samples)"
+        else:
+            x_label = "Key timestep"
+            y_label = "Query timestep"
+            heatmap_type = "Timestep-level attention heatmap"
+
+        axes3[0].set_title(
+            f"Normal ECG | Attention Heatmap | {Component}, Layer {LayerIndex}"
+            + (f", Head {HeadIndex}" if HeadIndex is not None else ", all heads averaged")
+        )
+        axes3[0].set_xlabel(x_label)
+        axes3[0].set_ylabel(y_label)
+
+        axes3[1].set_title(
+            f"Anomalous ECG | Attention Heatmap | {Component}, Layer {LayerIndex}"
+            + (f", Head {HeadIndex}" if HeadIndex is not None else ", all heads averaged")
+        )
+        axes3[1].set_xlabel(x_label)
+        axes3[1].set_ylabel(y_label)
+
+        fig3.colorbar(im0, ax=axes3[0], fraction=0.046, pad=0.04)
+        fig3.colorbar(im1, ax=axes3[1], fraction=0.046, pad=0.04)
+
+        fig3.suptitle(
+            f"TranAD Attention Heatmaps | Normal Sample {NormalIndex} vs Anomalous Sample {AnomalousIndex}",
+            fontsize=16,
+            fontweight="bold",
+        )
+
+        plt.tight_layout()
+        plt.show()
+
+
+    # ──────────────────────────────────────────────────────────
 
     def ShowTrainingHistory(self) -> None:
             """
