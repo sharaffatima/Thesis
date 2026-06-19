@@ -777,39 +777,131 @@ class AnoFormerMainModel:
 
     # ──────────────────────────────────────────────────────────
     @torch.no_grad()
+    def CalculateScores(
+        self,
+        DataLoaderObject: DataLoader,
+        NumMaskRuns: int = 5,
+        Seed: int = 42,
+    ) -> np.ndarray:
+        """
+        Calculates one stable anomaly score per ECG.
+
+        Because AnoFormer uses random masking, the scores are
+        averaged across several masking runs.
+        """
+
+        self.Generator.eval()
+
+        ScoresFromRuns: list[np.ndarray] = []
+
+        for RunIndex in range(NumMaskRuns):
+
+            CurrentSeed = Seed + RunIndex
+
+            torch.manual_seed(CurrentSeed)
+            np.random.seed(CurrentSeed)
+
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(CurrentSeed)
+
+            CurrentRunScores: list[np.ndarray] = []
+
+            for WindowData, _ in DataLoaderObject:
+
+                WindowData = WindowData.to(self.Device)
+
+                MaskedData, _ = self.Masking(
+                    WindowData,
+                    ReconstructionError=None,
+                )
+
+                Reconstruction = self.Generator(
+                    MaskedData
+                )
+
+                ErrorPerTime = (
+                    self.Generator.ComputeErrorPerTimestep(
+                        Reconstruction,
+                        WindowData,
+                    )
+                )
+
+                # One score per ECG
+                BatchScores = ErrorPerTime.mean(dim=1)
+
+                CurrentRunScores.append(
+                    BatchScores.cpu().numpy()
+                )
+
+            CurrentRunScores = np.concatenate(
+                CurrentRunScores,
+                axis=0,
+            )
+
+            ScoresFromRuns.append(
+                CurrentRunScores
+            )
+
+        ScoresFromRuns = np.stack(
+            ScoresFromRuns,
+            axis=0,
+        )
+
+        StableScores = ScoresFromRuns.mean(
+            axis=0,
+        )
+
+        return StableScores
+
+    # ──────────────────────────────────────────────────────────
+    @torch.no_grad()
     def DetectAnomalies(
         self,
-        TestLoader: DataLoader,        # DataLoader mit Testdaten
-        Threshold: float | None = None,  # Optionaler fester Schwellenwert
+        TestLoader: DataLoader,
+        Threshold: float | None = None,
+        Percentile: float = 95.0,
+        NumMaskRuns: int = 5,
+        Seed: int = 42,
     ) -> tuple[np.ndarray, np.ndarray]:
         """
-        Berechnet Anomalie-Scores und klassifiziert Fenster als anomal/normal.
-        Score = mittlerer MSE des Generators über alle Zeitschritte eines Fensters.
-        Rückgabe: (AnomalieScores, BinäreKlassifikation) je (N,)
+        Calculates stable anomaly scores and converts them
+        into binary predictions.
         """
-        self.Generator.eval()          # Auswertungsmodus (kein Dropout)
-        AllErrors: list[np.ndarray] = []  # Fehlerliste für alle Batches
 
-        for WindowData, _ in TestLoader:              # Durch alle Test-Batches iterieren
-            WindowData     = WindowData.to(self.Device)
-            MaskedTemp, _  = self.Masking(WindowData, None)   # Schritt-1-Masking anwenden
-            Reconstruction = self.Generator(MaskedTemp)       # Rekonstruktion berechnen
-            ErrorPerTime   = self.Generator.ComputeErrorPerTimestep(Reconstruction, WindowData)
-            AllErrors.append(ErrorPerTime.cpu().numpy())      # CPU-Array sammeln
-
-        # Alle Fehler zusammenführen → (N, T) und über Zeit mitteln → (N,)
-        AllScores = np.concatenate(AllErrors, axis=0).mean(axis=1)
-
-        # Schwellenwert bestimmen (Priorität: Argument > gespeicherter Wert > 95. Perzentil)
-        UsedThreshold = (
-            Threshold if Threshold is not None                    # Explizit übergeben?
-            else (self.AnomalyLimit if self.AnomalyLimit is not None  # Schon gespeichert?
-                  else float(np.percentile(AllScores, 95)))       # Sonst: 95. Perzentil berechnen
+        # Use the score-calculation method
+        AllScores = self.CalculateScores(
+            DataLoaderObject=TestLoader,
+            NumMaskRuns=NumMaskRuns,
+            Seed=Seed,
         )
-        self.AnomalyLimit = UsedThreshold                         # Schwellenwert für spätere Nutzung merken
 
-        AnomalyBinary = (AllScores > UsedThreshold).astype(int)  # 1 = anomal, 0 = normal
-        return AllScores, AnomalyBinary                           # Scores und Labels zurückgeben
+        # Threshold priority:
+        # 1. explicitly provided threshold
+        # 2. stored threshold
+        # 3. percentile of current scores
+        if Threshold is not None:
+            UsedThreshold = float(Threshold)
+
+        elif self.AnomalyLimit is not None:
+            UsedThreshold = float(
+                self.AnomalyLimit
+            )
+
+        else:
+            UsedThreshold = float(
+                np.percentile(
+                    AllScores,
+                    Percentile,
+                )
+            )
+
+        self.AnomalyLimit = UsedThreshold
+
+        AnomalyBinary = (
+            AllScores >= UsedThreshold
+        ).astype(int)
+
+        return AllScores, AnomalyBinary
 
     # ──────────────────────────────────────────────────────────
     def Evaluate(
