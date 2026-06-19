@@ -906,36 +906,95 @@ class AnoFormerMainModel:
     # ──────────────────────────────────────────────────────────
     def Evaluate(
         self,
-        TestLoader: DataLoader,
-        TrueLabels: np.ndarray,         # Ground-Truth Anomalie-Labels (0 oder 1)
+        TrueLabels: np.ndarray,
+        Scores: np.ndarray,
+        PredictedLabels: np.ndarray,
     ) -> dict[str, float]:
         """
-        Evaluiert den AnoFormer anhand von Precision, Recall und F1-Score.
-        Berechnet alles ohne sklearn – nur NumPy/Python.
+        Evaluates already calculated AnoFormer scores and predictions.
+
+        This method does not run inference again and does not select
+        another threshold.
         """
-        Scores, PredictedLabels = self.DetectAnomalies(TestLoader)  # Scores + Vorhersagen holen
 
-        # ── Konfusionsmatrix-Elemente berechnen ─────────────────
-        TruePositive  = int(((PredictedLabels == 1) & (TrueLabels == 1)).sum())  # Richtig als anomal erkannt
-        FalsePositive = int(((PredictedLabels == 1) & (TrueLabels == 0)).sum())  # Normal fälschlisch als anomal
-        FalseNegative = int(((PredictedLabels == 0) & (TrueLabels == 1)).sum())  # Anomalie übersehen
+        TrueLabels = np.asarray(TrueLabels).astype(int).reshape(-1)
+        Scores = np.asarray(Scores).reshape(-1)
+        PredictedLabels = np.asarray(PredictedLabels).astype(int).reshape(-1)
 
-        # ── Metriken berechnen ───────────────────────────────────
-        Precision = TruePositive / (TruePositive + FalsePositive + 1e-9)  # Genauigkeit der Alarme
-        Recall    = TruePositive / (TruePositive + FalseNegative + 1e-9)  # Trefferquote der Anomalien
-        F1Score   = 2 * Precision * Recall / (Precision + Recall + 1e-9)  # Harmonisches Mittel
+        if not (
+            len(TrueLabels)
+            == len(Scores)
+            == len(PredictedLabels)
+        ):
+            raise ValueError(
+                "TrueLabels, Scores and PredictedLabels must have "
+                "the same length."
+            )
+
+        # Confusion-matrix values
+        TruePositive = int(
+            ((PredictedLabels == 1) & (TrueLabels == 1)).sum()
+        )
+
+        TrueNegative = int(
+            ((PredictedLabels == 0) & (TrueLabels == 0)).sum()
+        )
+
+        FalsePositive = int(
+            ((PredictedLabels == 1) & (TrueLabels == 0)).sum()
+        )
+
+        FalseNegative = int(
+            ((PredictedLabels == 0) & (TrueLabels == 1)).sum()
+        )
+
+        # Classification metrics
+        Precision = (
+            TruePositive
+            / (TruePositive + FalsePositive + 1e-9)
+        )
+
+        Recall = (
+            TruePositive
+            / (TruePositive + FalseNegative + 1e-9)
+        )
+
+        F1Score = (
+            2 * Precision * Recall
+            / (Precision + Recall + 1e-9)
+        )
+
+        Accuracy = (
+            TruePositive + TrueNegative
+        ) / (
+            TruePositive
+            + TrueNegative
+            + FalsePositive
+            + FalseNegative
+            + 1e-9
+        )
+
+        FalseNegativeRate = (
+            FalseNegative
+            / (FalseNegative + TruePositive + 1e-9)
+        )
 
         Results = {
-            "Precision":     round(Precision, 4),     # Wie viele Alarme sind korrekt?
-            "Recall":        round(Recall, 4),         # Wie viele Anomalien wurden gefunden?
-            "F1Score":       round(F1Score, 4),        # Ausgewogenes Gesamtmaß
-            "Threshold":     round(self.AnomalyLimit, 6),  # Verwendeter Schwellenwert
-            "TruePositive":  TruePositive,             # Richtig-Positiv-Anzahl
-            "FalsePositive": FalsePositive,            # Falsch-Positiv-Anzahl (Fehlalarme)
-            "FalseNegative": FalseNegative,            # Falsch-Negativ-Anzahl (übersehene Anomalien)
+            "Accuracy": round(Accuracy, 4),
+            "Precision": round(Precision, 4),
+            "Recall": round(Recall, 4),
+            "F1Score": round(F1Score, 4),
+            "FalseNegativeRate": round(FalseNegativeRate, 4),
+            "Threshold": round(float(self.AnomalyLimit), 6),
+            "TruePositive": TruePositive,
+            "TrueNegative": TrueNegative,
+            "FalsePositive": FalsePositive,
+            "FalseNegative": FalseNegative,
         }
+
         for Name, Value in Results.items():
-            print(f"  {Name:<20}: {Value}")            # Alle Metriken ausgeben
+            print(f"  {Name:<20}: {Value}")
+
         return Results
 
     # ──────────────────────────────────────────────────────────
