@@ -739,75 +739,263 @@ class TranADMainModel:
 
     # ──────────────────────────────────────────────────────────────
     @torch.no_grad()
+    def CalculateScores(
+        self,
+        DataLoaderObject: DataLoader,
+    ) -> np.ndarray:
+        """
+        Calculates one anomaly score per ECG record.
+
+        The score is the mean Phase-2 reconstruction error,
+        averaged over all features and timesteps.
+
+        Returns:
+            Scores with shape (number_of_records,)
+        """
+
+        self.Network.eval()
+
+        AllWindowScores: List[np.ndarray] = []
+
+        for WindowBatch, _ in DataLoaderObject:
+
+            WindowBatch = WindowBatch.to(
+                self.Device
+            )
+
+            # TranAD returns Phase-1 and Phase-2 reconstructions.
+            # The current implementation uses Phase 2 for scoring.
+            _, Reconstruction2 = self.Network(
+                WindowBatch
+            )
+
+            # First average over the 12 ECG leads,
+            # then average over the 1000 timesteps.
+            WindowScores = (
+                (Reconstruction2 - WindowBatch) ** 2
+            ).mean(
+                dim=-1
+            ).mean(
+                dim=-1
+            )
+
+            AllWindowScores.append(
+                WindowScores.cpu().numpy()
+            )
+
+        Scores = np.concatenate(
+            AllWindowScores,
+            axis=0,
+        )
+
+        return Scores
+
+
+    # ──────────────────────────────────────────────────────────────
+    @torch.no_grad()
     def DetectAnomalies(
         self,
-        TestLoader:  DataLoader,
-        Percentile:  Optional[float] = None,  # Überschreibt self.AnomalyPercentile / Overrides self.AnomalyPercentile
+        TestLoader: DataLoader,
+        Threshold: Optional[float] = None,
+        Percentile: Optional[float] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Berechnet Anomalie-Scores und binäre Klassifikation.
-        / Computes anomaly scores and binary classification.
-        Score = mittlerer Phase-2-MSE über Zeitschritte eines Fensters.
-        / Score = mean Phase-2 MSE over timesteps of a window.
-        Rückgabe / Returns: (AnomalyScores (N,), BinaryLabels (N,))
+        Calculates anomaly scores and applies a threshold.
+
+        Threshold priority:
+            1. Explicit Threshold argument
+            2. Stored self.AnomalyThreshold
+            3. Percentile fallback
         """
-        self.Network.eval()                             # Eval-Modus / Eval mode
-        AllWindowScores: List[np.ndarray] = []          # Scores aller Fenster / Scores of all windows
 
-        for WindowBatch, _ in TestLoader:               # Durch Test-Batches / Through test batches
-            WindowBatch       = WindowBatch.to(self.Device)
-            _, Reconstruction2 = self.Network(WindowBatch)   # Nur Phase-2-Rekonstruktion / Only Phase-2
+        AllScores = self.CalculateScores(
+            DataLoaderObject=TestLoader
+        )
 
-            # Mittlerer MSE über Features pro Zeitschritt, dann über Zeitschritte gemittelt
-            # / Mean MSE over features per timestep, then mean over timesteps
-            WindowScore = ((Reconstruction2 - WindowBatch) ** 2).mean(dim=-1).mean(dim=-1)  # (B,)
-            AllWindowScores.append(WindowScore.cpu().numpy())   # Auf CPU / To CPU
+        if Threshold is not None:
 
-        AllScores    = np.concatenate(AllWindowScores, axis=0)  # (N,) – alle Fenster-Scores / all window scores
-        UsedPercentile = Percentile if Percentile is not None else self.AnomalyPercentile
-        ThresholdValue = float(np.percentile(AllScores, UsedPercentile))  # Schwellenwert / Threshold
+            ThresholdValue = float(
+                Threshold
+            )
 
-        self.AnomalyThreshold = ThresholdValue          # Für spätere Nutzung speichern / Store for later use
-        BinaryLabels = (AllScores > ThresholdValue).astype(int)  # 1 = anomal, 0 = normal
-        return AllScores, BinaryLabels                  # Scores und Vorhersagen zurückgeben / Return scores and predictions
+        elif self.AnomalyThreshold is not None:
+
+            ThresholdValue = float(
+                self.AnomalyThreshold
+            )
+
+        else:
+
+            UsedPercentile = (
+                Percentile
+                if Percentile is not None
+                else self.AnomalyPercentile
+            )
+
+            ThresholdValue = float(
+                np.percentile(
+                    AllScores,
+                    UsedPercentile,
+                )
+            )
+
+        self.AnomalyThreshold = ThresholdValue
+
+        BinaryLabels = (
+            AllScores >= ThresholdValue
+        ).astype(int)
+
+        return AllScores, BinaryLabels
 
     # ──────────────────────────────────────────────────────────────
     def Evaluate(
         self,
-        TestLoader:  DataLoader,
-        TrueLabels:  np.ndarray,          # (N,) Ground-Truth-Labels / Ground-Truth labels
-        Percentile:  Optional[float] = None,
-    ) -> Dict[str, float]:
+        TrueLabels: np.ndarray,
+        Scores: np.ndarray,
+        PredictedLabels: np.ndarray,
+    ) -> dict[str, float | int]:
         """
-        Berechnet Precision, Recall, F1 ohne sklearn / ohne externe Bibliothek.
-        / Computes Precision, Recall, F1 without sklearn / without external library.
+        Evaluates already calculated scores and predictions.
+
+        This method does not run inference again and does not
+        calculate another threshold.
         """
-        AnomalyScores, PredictedLabels = self.DetectAnomalies(TestLoader, Percentile)
 
-        # ── Konfusionsmatrix / Confusion matrix ──────────────────
-        TruePositive  = int(((PredictedLabels == 1) & (TrueLabels == 1)).sum())  # Richtig positiv / True positive
-        FalsePositive = int(((PredictedLabels == 1) & (TrueLabels == 0)).sum())  # Falsch positiv / False positive
-        FalseNegative = int(((PredictedLabels == 0) & (TrueLabels == 1)).sum())  # Falsch negativ / False negative
-        TrueNegative  = int(((PredictedLabels == 0) & (TrueLabels == 0)).sum())  # Richtig negativ / True negative
+        TrueLabels = np.asarray(
+            TrueLabels
+        ).astype(int).reshape(-1)
 
-        # ── Metriken / Metrics ────────────────────────────────────
-        Precision = TruePositive / (TruePositive + FalsePositive + 1e-9)  # Präzision / Precision
-        Recall    = TruePositive / (TruePositive + FalseNegative + 1e-9)  # Trefferquote / Recall
-        F1Score   = 2 * Precision * Recall / (Precision + Recall + 1e-9)  # F1-Maß / F1 measure
+        Scores = np.asarray(
+            Scores
+        ).reshape(-1)
+
+        PredictedLabels = np.asarray(
+            PredictedLabels
+        ).astype(int).reshape(-1)
+
+        if not (
+            len(TrueLabels)
+            == len(Scores)
+            == len(PredictedLabels)
+        ):
+            raise ValueError(
+                "TrueLabels, Scores and PredictedLabels "
+                "must have the same length."
+            )
+
+        TruePositive = int(
+            (
+                (PredictedLabels == 1)
+                & (TrueLabels == 1)
+            ).sum()
+        )
+
+        TrueNegative = int(
+            (
+                (PredictedLabels == 0)
+                & (TrueLabels == 0)
+            ).sum()
+        )
+
+        FalsePositive = int(
+            (
+                (PredictedLabels == 1)
+                & (TrueLabels == 0)
+            ).sum()
+        )
+
+        FalseNegative = int(
+            (
+                (PredictedLabels == 0)
+                & (TrueLabels == 1)
+            ).sum()
+        )
+
+        Precision = (
+            TruePositive
+            / (
+                TruePositive
+                + FalsePositive
+                + 1e-9
+            )
+        )
+
+        Recall = (
+            TruePositive
+            / (
+                TruePositive
+                + FalseNegative
+                + 1e-9
+            )
+        )
+
+        F1Score = (
+            2
+            * Precision
+            * Recall
+            / (
+                Precision
+                + Recall
+                + 1e-9
+            )
+        )
+
+        Accuracy = (
+            TruePositive
+            + TrueNegative
+        ) / (
+            TruePositive
+            + TrueNegative
+            + FalsePositive
+            + FalseNegative
+            + 1e-9
+        )
+
+        FalseNegativeRate = (
+            FalseNegative
+            / (
+                FalseNegative
+                + TruePositive
+                + 1e-9
+            )
+        )
+
+        ThresholdValue = (
+            round(
+                float(self.AnomalyThreshold),
+                6,
+            )
+            if self.AnomalyThreshold is not None
+            else None
+        )
 
         Results = {
-            "Precision":     round(Precision, 4),
-            "Recall":        round(Recall, 4),
-            "F1Score":       round(F1Score, 4),
-            "Threshold":     round(float(self.AnomalyThreshold), 6),
-            "TruePositive":  TruePositive,
+            "Accuracy": round(Accuracy, 4),
+            "Precision": round(Precision, 4),
+            "Recall": round(Recall, 4),
+            "F1Score": round(F1Score, 4),
+            "FalseNegativeRate": round(
+                FalseNegativeRate,
+                4,
+            ),
+            "Threshold": ThresholdValue,
+            "TruePositive": TruePositive,
+            "TrueNegative": TrueNegative,
             "FalsePositive": FalsePositive,
             "FalseNegative": FalseNegative,
-            "TrueNegative":  TrueNegative,
         }
-        print("\n Evaluation Results ──────────────────")
+
+        print(
+            "\nTranAD Evaluation Results "
+            "──────────────────"
+        )
+
         for MetricName, MetricValue in Results.items():
-            print(f"  {MetricName:<20}: {MetricValue}")
+            print(
+                f"  {MetricName:<20}: "
+                f"{MetricValue}"
+            )
+
         return Results
 
     # ──────────────────────────────────────────────────────────────
