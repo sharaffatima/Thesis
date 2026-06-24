@@ -6,7 +6,6 @@ import matplotlib.pyplot as plt
 from typing import Optional, List
 from models.anoformer import AnoFormerMainModel
 from models.tranad import TranADMainModel
-from utils.dataset import PTBXLTranADDataset
 
 
 
