@@ -34,6 +34,7 @@ bachelor-thesis/
 │
 ├── utils/
 │   ├── dataset.py
+│   ├── anomaly_threshold.py
 │   └── seed.py
 │
 ├── requirements.txt

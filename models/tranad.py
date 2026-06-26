@@ -989,7 +989,7 @@ class TranADMainModel:
             "FalseNegative": FalseNegative,
             "ROC_AUC": round(ROC_AUC, 4),
             "PR_AUC": round(PR_AUC, 4),
-            "ConfusionMatrix": ConfMatrix,
+            "ConfusionMatrix\n": ConfMatrix,
         }
 
         print(
