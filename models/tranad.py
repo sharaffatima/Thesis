@@ -1,12 +1,15 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.optim as optim
 import math
 from typing import Dict, List, Optional, Tuple
 from torch.utils.data import DataLoader
-from torch.utils.data import Dataset
 import numpy as np
+from sklearn.metrics import (
+    roc_auc_score,
+    average_precision_score,
+    confusion_matrix,
+)
 
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -969,20 +972,24 @@ class TranADMainModel:
             else None
         )
 
+        ROC_AUC = roc_auc_score(TrueLabels, Scores)
+        PR_AUC = average_precision_score(TrueLabels, Scores)
+        ConfMatrix = confusion_matrix(TrueLabels, PredictedLabels)
+
         Results = {
             "Accuracy": round(Accuracy, 4),
             "Precision": round(Precision, 4),
             "Recall": round(Recall, 4),
             "F1Score": round(F1Score, 4),
-            "FalseNegativeRate": round(
-                FalseNegativeRate,
-                4,
-            ),
+            "FalseNegativeRate": round(FalseNegativeRate, 4),
             "Threshold": ThresholdValue,
             "TruePositive": TruePositive,
             "TrueNegative": TrueNegative,
             "FalsePositive": FalsePositive,
             "FalseNegative": FalseNegative,
+            "ROC_AUC": round(ROC_AUC, 4),
+            "PR_AUC": round(PR_AUC, 4),
+            "ConfusionMatrix": ConfMatrix,
         }
 
         print(

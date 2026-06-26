@@ -5,6 +5,12 @@ import torch.optim as optim
 import math
 from torch.utils.data import DataLoader
 import numpy as np
+from sklearn.metrics import (
+    roc_auc_score,
+    average_precision_score,
+    confusion_matrix,
+    precision_recall_curve
+)
 
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -979,6 +985,10 @@ class AnoFormerMainModel:
             / (FalseNegative + TruePositive + 1e-9)
         )
 
+        ROC_AUC = roc_auc_score(TrueLabels, Scores)
+        PR_AUC = average_precision_score(TrueLabels, Scores)
+        ConfMatrix = confusion_matrix(TrueLabels, PredictedLabels)
+
         Results = {
             "Accuracy": round(Accuracy, 4),
             "Precision": round(Precision, 4),
@@ -990,6 +1000,9 @@ class AnoFormerMainModel:
             "TrueNegative": TrueNegative,
             "FalsePositive": FalsePositive,
             "FalseNegative": FalseNegative,
+            "ROC_AUC": round(ROC_AUC, 4),
+            "PR_AUC": round(PR_AUC, 4),
+            "ConfusionMatrix": ConfMatrix,
         }
 
         for Name, Value in Results.items():
