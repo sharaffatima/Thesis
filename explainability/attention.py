@@ -173,6 +173,39 @@ class AnoFormerExplainability:
         return AttentionImportance
 
     # ──────────────────────────────────────────────────────────
+    def GetIntervalAttentionImportance(
+        self,
+        TimeSeriesWindow: torch.Tensor,
+        BlockIndex: int = 0,
+        HeadIndex: int | None = None,
+        BlockSize: int = 10,
+    ) -> np.ndarray:
+        """
+        Returns mean attention received per temporal interval.
+
+        For an ECG with 1000 timesteps and BlockSize=10,
+        the output shape is (100,).
+        """
+
+        AttentionImportance = self.GetAttentionImportance(
+            TimeSeriesWindow=TimeSeriesWindow,
+            BlockIndex=BlockIndex,
+            HeadIndex=HeadIndex,
+        )
+
+        NumIntervals = len(AttentionImportance) // BlockSize
+        TrimmedLength = NumIntervals * BlockSize
+
+        TrimmedImportance = AttentionImportance[:TrimmedLength]
+
+        IntervalImportance = TrimmedImportance.reshape(
+            NumIntervals,
+            BlockSize,
+        ).mean(axis=1)
+
+        return IntervalImportance
+
+    # ──────────────────────────────────────────────────────────
     def GetReconstructionErrorOverTime(
         self,
         TimeSeriesWindow: torch.Tensor,
