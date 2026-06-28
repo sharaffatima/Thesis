@@ -780,9 +780,63 @@ class TranADExplainability:
 
         return AggregatedMatrix 
     
+    # ──────────────────────────────────────────────────────────
+    def GetIntervalAttentionImportance(
+        self,
+        TimeSeriesWindow: torch.Tensor,
+        Component: str = "Encoder",
+        LayerIndex: int = 0,
+        HeadIndex: int | None = None,
+        BlockSize: int = 10,
+    ) -> np.ndarray:
+        """
+        Returns mean attention received per temporal interval.
 
+        The attention matrix is first reduced from (T, T) to (T,)
+        by averaging over all query positions. The timestep-level
+        values are then averaged within temporal intervals.
 
+        For an ECG with 1000 timesteps and BlockSize=10,
+        the returned shape is (100,).
+        """
 
+        if BlockSize <= 0:
+            raise ValueError("BlockSize must be greater than zero.")
+
+        # Shape: (T, T)
+        AttentionMatrix = self._get_attention_matrix(
+            TimeSeriesWindow=TimeSeriesWindow,
+            Component=Component,
+            LayerIndex=LayerIndex,
+            HeadIndex=HeadIndex,
+        )
+
+        # Average across query positions.
+        # Result: attention received by each key timestep, shape (T,)
+        AttentionImportance = AttentionMatrix.mean(axis=0)
+
+        NumIntervals = len(AttentionImportance) // BlockSize
+
+        if NumIntervals == 0:
+            raise ValueError(
+                "BlockSize is larger than the attention sequence."
+            )
+
+        TrimmedLength = NumIntervals * BlockSize
+
+        TrimmedImportance = AttentionImportance[
+            :TrimmedLength
+        ]
+
+        # Shape: (NumIntervals, BlockSize) -> (NumIntervals,)
+        IntervalImportance = TrimmedImportance.reshape(
+            NumIntervals,
+            BlockSize,
+        ).mean(axis=1)
+
+        return IntervalImportance
+
+    # ──────────────────────────────────────────────────────────
     def GetTranADReconstructionErrorOverTime(
         self,
         TimeSeriesWindow: torch.Tensor,
@@ -812,7 +866,8 @@ class TranADExplainability:
         ReconstructionError = ((OriginalNP - ReconstructedNP) ** 2).mean(axis=1)
 
         return OriginalNP, ReconstructedNP, ReconstructionError
-
+    
+    # ──────────────────────────────────────────────────────────    
     def CompareNormalAndAnomalousAttention(
         self,
         NormalWindow: torch.Tensor,
