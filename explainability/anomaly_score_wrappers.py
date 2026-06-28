@@ -106,6 +106,34 @@ class AnoFormerAnomalyScoreWrapper(nn.Module):
 # TranAD Anomaly Score Wrapper for SHAP
 # ============================================================
 class TranADAnomalyScoreWrapper(nn.Module):
-    def forward(self, x):
-        # Implementation for TranAD anomaly score wrapper
-        pass
+    """
+    Wraps TranAD as a scalar anomaly-score function for SHAP.
+
+    Input:
+        ECG batch with shape (B, T, F)
+
+    Output:
+        Phase-2 reconstruction MSE with shape (B, 1)
+    """
+    def __init__(self, tranad_model):
+        super().__init__()
+
+        self.Network = tranad_model.Network
+        self.Network.eval()  # switch off training mode and into evaluation
+
+        for parameter in self.Network.parameters():
+            parameter.requires_grad_(False)
+        
+    def forward(self, x:torch.Tensor) -> torch.Tensor:
+        if x.ndim != 3:
+             raise ValueError(
+                "Expected input shape (batch, time, features)"
+            )
+        
+        # Tranad forward pass (two reconstructions, but we only need the second one)
+        _, reconstruction2 = self.Network(x)
+
+        # Mean squared reconstruction error for each ECG separately
+        score = (reconstruction2 - x).pow(2).mean(dim=(1, 2))
+
+        return score.unsqueeze(-1)  # shape (B, 1)
