@@ -6,45 +6,35 @@ import matplotlib.pyplot as plt
 
 # Helper functions for Plotting comparable Attention and SHAP visualisations
 
-def min_max_normalize(values: np.ndarray) -> np.ndarray:
+def normalize_importance(values):
     values = np.asarray(values, dtype=np.float64)
 
-    minimum = values.min()
-    maximum = values.max()
+    value_min = values.min()
+    value_max = values.max()
 
-    if np.isclose(maximum, minimum):
+    if np.isclose(value_min, value_max):
         return np.zeros_like(values)
 
-    return (values - minimum) / (maximum - minimum)
+    return (values - value_min) / (value_max - value_min)
 
 
-def plot_temporal_explanation(
-    importance: np.ndarray,
-    title: str,
-    interval_seconds: float = 0.1,
+def plot_temporal_importance(
+    values,
+    title,
     save_path=None,
-) -> None:
-    """
-    Plot one normalized temporal explanation.
-
-    importance shape: (number_of_intervals,)
-    """
-
-    importance = min_max_normalize(importance)
-    heatmap = importance[np.newaxis, :]  # (1, intervals)
-
-    duration = importance.shape[0] * interval_seconds
+):
+    normalized = normalize_importance(values)
 
     figure, axis = plt.subplots(figsize=(14, 2.2))
 
     image = axis.imshow(
-        heatmap,
+        normalized[np.newaxis, :],
         aspect="auto",
         interpolation="nearest",
         cmap="viridis",
         vmin=0,
         vmax=1,
-        extent=[0, duration, 0, 1],
+        extent=[0, 10, 0, 1],
     )
 
     axis.set_title(title)
