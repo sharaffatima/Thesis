@@ -491,7 +491,7 @@ class TransformerGenerator(nn.Module):
 
         # ── Loss-Funktionen ──────────────────────────────────────
         self.ReconstructionLoss = nn.MSELoss(reduction="none")   # MSE elementweise → für Fehler pro Token
-        self.GeneratorLoss      = nn.BCEWithLogitsLoss()          # GAN-Loss: Generator will Dискriminator täuschen
+        self.GeneratorLoss      = nn.BCEWithLogitsLoss()          # GAN-Loss: Generator will Diskriminator täuschen
 
         # ── Optimierer & Lernraten-Scheduler ────────────────────
         self.Optimizer = optim.Adam(

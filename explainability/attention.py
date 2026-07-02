@@ -253,6 +253,7 @@ class AnoFormerExplainability:
         BlockSize: int = 10,
         Aggregation: str = "mean_attention_mass",
         SamplingRate: int = 100,
+        WindowLengthSamples: int = 30,
     ) -> None:
         """
         Compares attention and reconstruction behavior for one normal
@@ -514,95 +515,348 @@ class AnoFormerExplainability:
         # Figure 3: Attention Heatmaps
         # ============================================================
 
-        fig3, axes3 = plt.subplots(1, 2, figsize=(18, 6))
-
-        NormalHeatmap = normal_att
-        AnomalousHeatmap = anom_att
-
-        if UseIntervalHeatmap:
-            NormalHeatmap = self._aggregate_attention_matrix(
-                AttentionMatrix=normal_att,
-                BlockSize=BlockSize,
-                Aggregation=Aggregation,
-            )
-
-            AnomalousHeatmap = self._aggregate_attention_matrix(
-                AttentionMatrix=anom_att,
-                BlockSize=BlockSize,
-                Aggregation=Aggregation,
-            )
-
+        # Shared scale for a fair normal/anomalous comparison
         shared_vmax = max(
-            np.percentile(NormalHeatmap, Percentile),
-            np.percentile(AnomalousHeatmap, Percentile),
+            np.percentile(normal_att, Percentile),
+            np.percentile(anom_att, Percentile),
         )
 
-        im0 = axes3[0].imshow(
-            NormalHeatmap,
-            aspect="auto",
-            cmap="viridis",
-            interpolation="nearest",
-            vmin=0,
-            vmax=shared_vmax,
-        )
 
-        im1 = axes3[1].imshow(
-            AnomalousHeatmap,
-            aspect="auto",
-            cmap="viridis",
-            interpolation="nearest",
-            vmin=0,
-            vmax=shared_vmax,
-        )
+        def plot_ecg_with_attention(
+            OriginalECG,
+            AttentionMatrix,
+            AttentionImportance,
+            SampleType,
+            SampleIndex,
+        ):
+            """
+            Plots the 12-lead ECG above the full T x T attention matrix.
 
-        if UseIntervalHeatmap:
-            NumIntervals = NormalHeatmap.shape[0]
+            The highlighted region is the fixed-length temporal window
+            receiving the greatest total attention.
+            """
 
-            TickStep = max(1, NumIntervals // 10)
-            TickPositions = list(range(0, NumIntervals, TickStep))
+            SequenceLength = OriginalECG.shape[0]
 
-            TickLabels = [
-                f"{pos * BlockSize / SamplingRate:.1f}s"
-                for pos in TickPositions
+            # --------------------------------------------------------
+            # Find the fixed-length window with maximum attention
+            # --------------------------------------------------------
+            if WindowLengthSamples <= 0:
+                raise ValueError(
+                    "WindowLengthSamples must be greater than zero."
+                )
+
+            if WindowLengthSamples > SequenceLength:
+                raise ValueError(
+                    "WindowLengthSamples cannot exceed the ECG length."
+                )
+
+            WindowScores = np.convolve(
+                AttentionImportance,
+                np.ones(
+                    WindowLengthSamples,
+                    dtype=np.float64,
+                ),
+                mode="valid",
+            )
+
+            StartSample = int(
+                np.argmax(WindowScores)
+            )
+
+            EndSample = (
+                StartSample
+                + WindowLengthSamples
+            )
+
+            # --------------------------------------------------------
+            # Create aligned ECG and heatmap panels
+            # --------------------------------------------------------
+            fig, axes = plt.subplots(
+                2,
+                1,
+                figsize=(17, 11),
+                gridspec_kw={
+                    "height_ratios": [1.7, 1.0],
+                    "hspace": 0.12,
+                },
+            )
+
+            ax_ecg = axes[0]
+            ax_heatmap = axes[1]
+
+            ECG_LEADS = [
+                "I", "II", "III",
+                "aVR", "aVL", "aVF",
+                "V1", "V2", "V3",
+                "V4", "V5", "V6",
             ]
 
-            axes3[0].set_xticks(TickPositions)
-            axes3[0].set_yticks(TickPositions)
-            axes3[0].set_xticklabels(TickLabels, rotation=45, ha="right")
-            axes3[0].set_yticklabels(TickLabels)
+            TimeAxis = np.arange(
+                SequenceLength
+            )
 
-            axes3[1].set_xticks(TickPositions)
-            axes3[1].set_yticks(TickPositions)
-            axes3[1].set_xticklabels(TickLabels, rotation=45, ha="right")
-            axes3[1].set_yticklabels(TickLabels)
+            # --------------------------------------------------------
+            # Plot the stacked 12-lead ECG
+            # --------------------------------------------------------
+            RobustLow = np.percentile(
+                OriginalECG,
+                1,
+            )
 
-            x_label = f"Key interval ({BlockSize / SamplingRate:.2f}s blocks)"
-            y_label = f"Query interval ({BlockSize / SamplingRate:.2f}s blocks)"
-            heatmap_type = f"Interval-level attention heatmap ({Aggregation}, {BlockSize} samples)"
-        else:
-            x_label = "Key timestep"
-            y_label = "Query timestep"
-            heatmap_type = "Timestep-level attention heatmap"
+            RobustHigh = np.percentile(
+                OriginalECG,
+                99,
+            )
 
-        axes3[0].set_title(f"Normal ECG | {heatmap_type}")
-        axes3[0].set_xlabel(x_label)
-        axes3[0].set_ylabel(y_label)
+            RobustRange = (
+                RobustHigh
+                - RobustLow
+            )
 
-        axes3[1].set_title(f"Anomalous ECG | {heatmap_type}")
-        axes3[1].set_xlabel(x_label)
-        axes3[1].set_ylabel(y_label)
+            LeadOffset = max(
+                RobustRange * 1.4,
+                1.0,
+            )
 
-        fig3.colorbar(im0, ax=axes3[0], fraction=0.046, pad=0.04)
-        fig3.colorbar(im1, ax=axes3[1], fraction=0.046, pad=0.04)
+            YTickPositions = []
 
-        fig3.suptitle(
-            f"AnoFormer Attention Heatmaps | Normal Sample {NormalIndex} vs Anomalous Sample {AnomalousIndex}",
-            fontsize=16,
-            fontweight="bold",
+            for LeadIndex in range(12):
+
+                # Lead I appears at the top and V6 at the bottom
+                Offset = (
+                    11 - LeadIndex
+                ) * LeadOffset
+
+                YTickPositions.append(
+                    Offset
+                )
+
+                ax_ecg.plot(
+                    TimeAxis,
+                    OriginalECG[:, LeadIndex]
+                    + Offset,
+                    color="black",
+                    linewidth=0.9,
+                )
+
+            # Selected colors:
+            # light salmon band with darker salmon dashed borders
+            HighlightFill = "#F4A6A0"
+            HighlightLine = "#E76F51"
+
+            ax_ecg.axvspan(
+                StartSample,
+                EndSample,
+                color=HighlightFill,
+                alpha=0.28,
+                zorder=0,
+            )
+
+            ax_ecg.axvline(
+                StartSample,
+                color=HighlightLine,
+                linestyle="--",
+                linewidth=1.3,
+            )
+
+            ax_ecg.axvline(
+                EndSample,
+                color=HighlightLine,
+                linestyle="--",
+                linewidth=1.3,
+            )
+
+            ax_ecg.set_xlim(
+                0,
+                SequenceLength,
+            )
+
+            ax_ecg.set_yticks(
+                YTickPositions
+            )
+
+            ax_ecg.set_yticklabels(
+                ECG_LEADS
+            )
+
+            ax_ecg.set_ylabel(
+                "ECG leads",
+                fontsize=13,
+            )
+
+            ax_ecg.set_xticks([])
+
+            ax_ecg.grid(
+                alpha=0.15
+            )
+
+            # --------------------------------------------------------
+            # Annotation above the selected region
+            # --------------------------------------------------------
+            YMaximum = (
+                11 * LeadOffset
+                + RobustHigh
+            )
+
+            WindowCenter = (
+                StartSample
+                + EndSample
+            ) / 2
+
+            ax_ecg.annotate(
+                "Most important temporal region",
+                xy=(
+                    WindowCenter,
+                    YMaximum,
+                ),
+                xytext=(
+                    WindowCenter,
+                    YMaximum
+                    + LeadOffset * 1.3,
+                ),
+                ha="center",
+                color="firebrick",
+                fontsize=13,
+                fontstyle="italic",
+                arrowprops={
+                    "arrowstyle": "->",
+                    "color": "firebrick",
+                    "linewidth": 1.4,
+                },
+            )
+
+            # --------------------------------------------------------
+            # Plot full 1000 x 1000 attention heatmap
+            # --------------------------------------------------------
+            HeatmapImage = ax_heatmap.imshow(
+                AttentionMatrix,
+                aspect="auto",
+
+                # Blue -> light blue -> yellow -> orange -> red
+                cmap="RdYlBu_r",
+
+                interpolation="nearest",
+                origin="upper",
+                vmin=0,
+                vmax=shared_vmax,
+
+                # Makes heatmap x coordinates correspond directly
+                # to ECG sample coordinates
+                extent=[
+                    0,
+                    SequenceLength,
+                    SequenceLength,
+                    0,
+                ],
+            )
+
+            # Highlight the key-time columns corresponding to the
+            # temporal importance vector
+            ax_heatmap.axvspan(
+                StartSample,
+                EndSample,
+                color=HighlightFill,
+                alpha=0.28,
+                zorder=2,
+            )
+
+            ax_heatmap.axvline(
+                StartSample,
+                color=HighlightLine,
+                linestyle="--",
+                linewidth=1.3,
+            )
+
+            ax_heatmap.axvline(
+                EndSample,
+                color=HighlightLine,
+                linestyle="--",
+                linewidth=1.3,
+            )
+
+            # --------------------------------------------------------
+            # Time axes in seconds
+            # --------------------------------------------------------
+            TickPositions = np.linspace(
+                0,
+                SequenceLength,
+                11,
+            )
+
+            TickLabels = [
+                f"{Position / SamplingRate:.1f}"
+                for Position in TickPositions
+            ]
+
+            ax_heatmap.set_xticks(
+                TickPositions
+            )
+
+            ax_heatmap.set_xticklabels(
+                TickLabels
+            )
+
+            ax_heatmap.set_yticks(
+                TickPositions
+            )
+
+            ax_heatmap.set_yticklabels(
+                TickLabels
+            )
+
+            ax_heatmap.set_xlabel(
+                "Key time (s)",
+                fontsize=12,
+            )
+
+            ax_heatmap.set_ylabel(
+                "Query time (s)",
+                fontsize=12,
+            )
+
+            Colorbar = fig.colorbar(
+                HeatmapImage,
+                ax=ax_heatmap,
+                fraction=0.025,
+                pad=0.02,
+            )
+
+            Colorbar.set_label(
+                "Attention importance",
+                fontsize=11,
+            )
+
+            fig.suptitle(
+                f"AnoFormer Attention | "
+                f"{SampleType} ECG | "
+                f"Sample {SampleIndex}",
+                fontsize=15,
+                fontweight="bold",
+            )
+
+            plt.tight_layout()
+            plt.show()
+
+
+        # ------------------------------------------------------------
+        # Produce one complete figure for each ECG
+        # ------------------------------------------------------------
+        plot_ecg_with_attention(
+            OriginalECG=normal_original,
+            AttentionMatrix=normal_att,
+            AttentionImportance=normal_att_imp,
+            SampleType="Normal",
+            SampleIndex=NormalIndex,
         )
 
-        plt.tight_layout()
-        plt.show()
+        plot_ecg_with_attention(
+            OriginalECG=anom_original,
+            AttentionMatrix=anom_att,
+            AttentionImportance=anom_att_imp,
+            SampleType="Anomalous",
+            SampleIndex=AnomalousIndex,
+        )
 
     # ──────────────────────────────────────────────────────────
     def ShowTrainingHistory(self) -> None:
