@@ -79,7 +79,7 @@ def plot_temporal_importance(
             -0.5,
             11.5,
         ],
-        alpha=0.70,
+        alpha=1.0,
     )
 
     row_positions = np.arange(11, -1, -1)
