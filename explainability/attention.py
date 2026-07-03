@@ -1166,10 +1166,23 @@ class TranADExplainability:
             np.percentile(AnomalousHeatmap, Percentile),
         )
 
+        BaseCmap = plt.get_cmap("RdYlBu_r")
+
+        BrightAttentionCmap = LinearSegmentedColormap.from_list(
+            "BrightAttention",
+            BaseCmap(
+                np.linspace(
+                    0.10,
+                    0.90,
+                    256,
+                )
+            ),
+        )
+
         im0 = axes3[0].imshow(
             NormalHeatmap,
             aspect="auto",
-            cmap="viridis",
+            cmap=BrightAttentionCmap,
             interpolation="nearest",
             vmin=0,
             vmax=shared_vmax,
@@ -1178,7 +1191,7 @@ class TranADExplainability:
         im1 = axes3[1].imshow(
             AnomalousHeatmap,
             aspect="auto",
-            cmap="viridis",
+            cmap=BrightAttentionCmap,
             interpolation="nearest",
             vmin=0,
             vmax=shared_vmax,
