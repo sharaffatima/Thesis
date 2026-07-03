@@ -107,7 +107,7 @@ def plot_temporal_importance(
         axis.plot(
             time_axis,
             signal,
-            color="#17324D",
+            color="#12263A",
             linewidth=0.9,
         )
 
