@@ -1,7 +1,7 @@
-import shap
 import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path
+from explainability.visualization import BrightImportanceCmap
 
 
 def aggregate_shap_intervals(
@@ -129,7 +129,7 @@ def plot_normal_anomalous_shap_heatmaps(
             heatmap,
             aspect="auto",
             interpolation="nearest",
-            cmap="viridis",
+            cmap=BrightImportanceCmap,
             vmin=0,
             vmax=shared_vmax,
             extent=[
