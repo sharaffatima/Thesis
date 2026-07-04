@@ -22,7 +22,7 @@ class SensitivityEvaluation:
         """
         Masks the top-ranked timesteps based on timestep-level importance.
         """
-        
+
         sequence_length = ecg.shape[1]
 
         # Prepare importance vector
@@ -151,7 +151,6 @@ class SensitivityEvaluation:
             "perturbed_score": perturbed_score,
             "score_difference": score_difference,
             "sensitivity_score": sensitivity_score,
-            "sensitivity_percentage": sensitivity_score * 100,
             "selected_timesteps": selected_timesteps,
             "masked_ranges": masked_ranges,
             "perturbed_ecg": perturbed_ecg,
