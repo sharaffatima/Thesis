@@ -158,7 +158,74 @@ class SensitivityEvaluation:
 
 
 class StabilityEvaluation:
-    pass
+    """
+    Stability evaluation for explanation methods.
+    Uses small Gaussian noise and mean cosine similarity.
+    """
+
+    def __init__(self, noise_ratio=0.01, epsilon=1e-8):
+        self.noise_ratio = noise_ratio
+        self.epsilon = epsilon
+
+    def add_gaussian_noise(self, ecg):
+        """
+        Add Gaussian noise independently to each ECG lead.
+        The noise standard deviation is 1% of the standard deviation
+        of each corresponding ECG lead by default.
+        """
+
+        if isinstance(ecg, np.ndarray):
+            ecg = torch.tensor(ecg, dtype=torch.float32)
+        
+        if ecg.ndim == 2:
+            ecg = ecg.unsqueeze(0)
+
+        # Standard deviation per lead: shape (1, 1, 12)
+        lead_std = ecg.std(dim=1, keepdim=True, unbiased=False)
+
+        noise = torch.randn_like(ecg) * self.noise_ratio * lead_std
+        noisy_ecg = ecg + noise
+
+        return noisy_ecg
+
+    def evaluate(self, original_importance, noisy_importance_values):
+        """
+        Calculate mean cosine similarity between the original explanation
+        and the explanations of noisy ECG variants
+        """
+        original_importance = np.asarray(original_importance, dtype=float).reshape(-1)
+
+        cosine_similarities = []
+
+        for noisy_importance in noisy_importance_values:
+            noisy_importance = np.asarray(noisy_importance, dtype=float).reshape(-1)
+
+            numerator = np.dot(original_importance, noisy_importance)
+
+            denominator = (
+                np.linalg.norm(original_importance)
+                * np.linalg.norm(noisy_importance)
+                + self.epsilon
+            )
+
+            cosine_similarity = numerator / denominator
+            cosine_similarities.append(cosine_similarity)
+
+        cosine_similarities = np.asarray(cosine_similarities, dtype=float)
+
+        stability_score = float(cosine_similarities.mean())
+
+        if len(cosine_similarities) > 1:
+            stability_std = float(cosine_similarities.std(ddof=1))
+        else:
+            stability_std = 0.0
+
+        return {
+            "stability_score": stability_score,
+            "stability_std": stability_std,
+            "cosine_similarities": cosine_similarities,
+        }
+
 
 
 class PlausibilityEvaluation:
