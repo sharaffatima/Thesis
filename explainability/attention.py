@@ -795,6 +795,30 @@ class TranADExplainability:
         return AggregatedMatrix 
     
     # ──────────────────────────────────────────────────────────
+    def GetAttentionImportance(
+        self,
+        TimeSeriesWindow: torch.Tensor,
+        Component: str = "Encoder",
+        LayerIndex: int = 0,
+        HeadIndex: int | None = None,
+    ) -> np.ndarray:
+        """
+        Returns mean attention received per timestep.
+        Shape: (T,)
+        """
+
+        AttentionMatrix = self._get_attention_matrix(
+            TimeSeriesWindow=TimeSeriesWindow,
+            Component=Component,
+            LayerIndex=LayerIndex,
+            HeadIndex=HeadIndex,
+        )
+
+        AttentionImportance = AttentionMatrix.mean(axis=0)
+
+        return AttentionImportance
+
+    # ──────────────────────────────────────────────────────────
     def GetIntervalAttentionImportance(
         self,
         TimeSeriesWindow: torch.Tensor,
