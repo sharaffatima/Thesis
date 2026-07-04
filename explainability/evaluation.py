@@ -1,61 +1,166 @@
-# Evaluation of Attention based Explainability and SHAP based Explainability
-# Stability, Sensitivity, Plausibility
-
 import numpy as np
-import matplotlib.pyplot as plt
-
-# Helper functions for Plotting comparable Attention and SHAP visualisations
-
-def normalize_importance(values):
-    values = np.asarray(values, dtype=np.float64)
-
-    value_min = values.min()
-    value_max = values.max()
-
-    if np.isclose(value_min, value_max):
-        return np.zeros_like(values)
-
-    return (values - value_min) / (value_max - value_min)
+import torch
 
 
-def plot_temporal_importance(
-    values,
-    title,
-    save_path=None,
-):
-    normalized = normalize_importance(values)
+class SensitivityEvaluation:
+    """
+    Sensitivity evaluation for explanation methods.
+    Uses timestep-level temporal importance values.
 
-    figure, axis = plt.subplots(figsize=(14, 2.2))
+    Steps:
+    1. Select the top 10% most important timesteps.
+    2. Mask these timesteps across all 12 ECG leads using linear interpolation.
+    3. Recalculate the anomaly score.
+    4. Compute the absolute relative anomaly-score change.
+    """
 
-    image = axis.imshow(
-        normalized[np.newaxis, :],
-        aspect="auto",
-        interpolation="nearest",
-        cmap="viridis",
-        vmin=0,
-        vmax=1,
-        extent=[0, 10, 0, 1],
-    )
+    def __init__(self, top_fraction=0.10, epsilon=1e-8):
+        self.top_fraction = top_fraction
+        self.epsilon = epsilon
 
-    axis.set_title(title)
-    axis.set_xlabel("Time (seconds)")
-    axis.set_yticks([0.5])
-    axis.set_yticklabels(["Importance"])
+    def mask_top_timesteps(self, ecg, temporal_importance):
+        """
+        Masks the top-ranked timesteps based on timestep-level importance.
+        """
+        
+        sequence_length = ecg.shape[1]
 
-    colorbar = figure.colorbar(
-        image,
-        ax=axis,
-        pad=0.02,
-    )
-    colorbar.set_label("Normalized importance")
+        # Prepare importance vector
+        importance = np.asarray(temporal_importance, dtype=float).reshape(-1)
 
-    figure.tight_layout()
+        if len(importance) != sequence_length:
+            raise ValueError(
+                f"temporal_importance must have length {sequence_length}, "
+                f"but got {len(importance)}."
+            )
 
-    if save_path is not None:
-        figure.savefig(
-            save_path,
-            dpi=300,
-            bbox_inches="tight",
+        # Select top 10% timesteps
+        number_selected = max(
+            1,
+            int(np.ceil(sequence_length * self.top_fraction))
         )
 
-    plt.show()
+        selected_timesteps = np.argsort(importance)[-number_selected:]
+        selected_timesteps = np.sort(selected_timesteps)
+
+        # Boolean mask for selected timesteps
+        timestep_mask = np.zeros(sequence_length, dtype=bool)
+        timestep_mask[selected_timesteps] = True
+
+        # Copy ECG before perturbation
+        perturbed_ecg = ecg.detach().clone()
+
+        # Find consecutive selected timestep regions
+        changes = np.diff(np.pad(timestep_mask.astype(int), (1, 1)))
+        starts = np.where(changes == 1)[0]
+        ends = np.where(changes == -1)[0]
+
+        masked_ranges = []
+
+        for start, end in zip(starts, ends):
+            start = int(start)
+            end = int(end)
+
+            masked_ranges.append((start, end))
+
+            region_length = end - start
+
+            # Normal case: selected region is between two valid neighbors
+            if start > 0 and end < sequence_length:
+                left_value = ecg[:, start - 1, :]
+                right_value = ecg[:, end, :]
+
+                weights = torch.linspace(
+                    0,
+                    1,
+                    region_length + 2,
+                    device=ecg.device,
+                    dtype=ecg.dtype,
+                )[1:-1].view(1, region_length, 1)
+
+                perturbed_ecg[:, start:end, :] = (
+                    left_value.unsqueeze(1) * (1 - weights)
+                    + right_value.unsqueeze(1) * weights
+                )
+
+            # Selected region starts at the beginning
+            elif start == 0 and end < sequence_length:
+                perturbed_ecg[:, start:end, :] = ecg[:, end:end + 1, :]
+
+            # Selected region reaches the end
+            elif start > 0 and end == sequence_length:
+                perturbed_ecg[:, start:end, :] = ecg[:, start - 1:start, :]
+
+            # Whole ECG selected, unlikely but safe fallback
+            else:
+                lead_mean = ecg.mean(dim=1, keepdim=True)
+                perturbed_ecg[:, start:end, :] = lead_mean
+
+        return perturbed_ecg, selected_timesteps, masked_ranges
+
+    def evaluate(self, ecg, temporal_importance, score_function):
+        """
+        Evaluates sensitivity for one ECG and one explanation method.
+        """
+
+        # Convert ECG to tensor if needed
+        if isinstance(ecg, np.ndarray):
+            ecg = torch.tensor(ecg, dtype=torch.float32)
+
+        if ecg.ndim == 2:
+            ecg = ecg.unsqueeze(0)
+
+        # Original anomaly score
+        with torch.no_grad():
+            original_score = score_function(ecg)
+
+        if isinstance(original_score, torch.Tensor):
+            original_score = float(original_score.detach().cpu().reshape(-1)[0])
+        elif isinstance(original_score, np.ndarray):
+            original_score = float(original_score.reshape(-1)[0])
+        else:
+            original_score = float(original_score)
+
+        # Mask top timesteps
+        perturbed_ecg, selected_timesteps, masked_ranges = self.mask_top_timesteps(
+            ecg=ecg,
+            temporal_importance=temporal_importance,
+        )
+
+        # Perturbed anomaly score
+        with torch.no_grad():
+            perturbed_score = score_function(perturbed_ecg)
+
+        if isinstance(perturbed_score, torch.Tensor):
+            perturbed_score = float(perturbed_score.detach().cpu().reshape(-1)[0])
+        elif isinstance(perturbed_score, np.ndarray):
+            perturbed_score = float(perturbed_score.reshape(-1)[0])
+        else:
+            perturbed_score = float(perturbed_score)
+
+        # Sensitivity score
+        score_difference = perturbed_score - original_score
+
+        sensitivity_score = (
+            abs(score_difference)
+            / (abs(original_score) + self.epsilon)
+        )
+
+        return {
+            "original_score": original_score,
+            "perturbed_score": perturbed_score,
+            "score_difference": score_difference,
+            "sensitivity_score": sensitivity_score,
+            "sensitivity_percentage": sensitivity_score * 100,
+            "selected_timesteps": selected_timesteps,
+            "masked_ranges": masked_ranges,
+            "perturbed_ecg": perturbed_ecg,
+        }
+
+
+class StabilityEvaluation:
+    pass
+
+
+class PlausibilityEvaluation:
+    pass
