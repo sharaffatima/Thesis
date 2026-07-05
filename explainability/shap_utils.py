@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path
-from explainability.visualization import BrightImportanceCmap
+from explainability.visualization import BrightCmap
 
 
 def aggregate_shap_intervals(
@@ -86,16 +86,8 @@ def plot_normal_anomalous_shap_heatmaps(
         constrained_layout=True,
     )
 
-    titles = [
-        "Normal ECG",
-        "Anomalous ECG",
-    ]
-
-    heatmaps = [
-        normal_heatmap,
-        anomalous_heatmap,
-    ]
-
+    titles = ["Normal ECG","Anomalous ECG"]
+    heatmaps = [normal_heatmap, anomalous_heatmap]
     image = None
 
     for axis, heatmap, title in zip(
@@ -107,7 +99,7 @@ def plot_normal_anomalous_shap_heatmaps(
             heatmap,
             aspect="auto",
             interpolation="nearest",
-            cmap=BrightImportanceCmap,
+            cmap=BrightCmap,
             vmin=0,
             vmax=shared_vmax,
             extent=[

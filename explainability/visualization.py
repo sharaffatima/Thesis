@@ -1,24 +1,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap
+from attention_utils import BrightCmap, ECG_LEADS
 
 # Helper functions for Plotting comparable Attention and SHAP visualisations
 # Those are mainly for the temporal importance plots
-
-ECG_LEADS = [
-    "I", "II", "III",
-    "aVR", "aVL", "aVF",
-    "V1", "V2", "V3",
-    "V4", "V5", "V6",
-]
-
-
-BaseCmap = plt.get_cmap("RdYlBu_r")
-
-BrightImportanceCmap = LinearSegmentedColormap.from_list(
-    "BrightImportance",
-    BaseCmap(np.linspace(0.10, 0.90, 256)),
-)
 
 
 def normalize_importance(values):
@@ -66,7 +51,7 @@ def plot_temporal_importance(
         normalized[np.newaxis, :],
         aspect="auto",
         interpolation="nearest",
-        cmap=BrightImportanceCmap,
+        cmap=BrightCmap,
         vmin=0,
         vmax=1,
         extent=[
@@ -82,13 +67,8 @@ def plot_temporal_importance(
 
     for lead_index in range(12):
         signal = ecg[:, lead_index]
-
         signal = signal - np.median(signal)
-
-        amplitude = np.percentile(
-            np.abs(signal),
-            99,
-        )
+        amplitude = np.percentile(np.abs(signal), 99)
 
         if amplitude > 0:
             signal = signal / amplitude
