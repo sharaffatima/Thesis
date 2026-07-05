@@ -11,328 +11,223 @@ from sklearn.metrics import (
     confusion_matrix,
 )
 
-
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-"""TranAD: Transformer-basierte Anomalieerkennung – Modellarchitektur und Bausteine."""
-
-# ============================================================
-# Elementare Bausteine / Elementary Building Blocks
-# MultiHeadScaledDotProductAttention, PositionwiseFeedForwardNetwork,
-# ResidualConnectionWithLayerNorm, SinusoidalPositionalEncoding,
-# InputEmbeddingLayer, OutputProjectionLayer
-# ============================================================
 class MultiHeadScaledDotProductAttention(nn.Module):
     """
-    Multi-Head Scaled Dot-Product Attention von Grund auf.
-    / Multi-Head Scaled Dot-Product Attention from scratch.
-    Formel / Formula: Attention(Q,K,V) = softmax(Q·Kᵀ / √d_k) · V
+    Multi-Head Self-Attention.
     """
-
     def __init__(
         self,
-        ModelDimension: int,          # d_model – Gesamt-Attention-Dimension / Total attention dimension
-        NumHeads:       int,          # H – Anzahl paralleler Köpfe / Number of parallel heads
-        DropoutRate:    float = 0.1,  # Dropout auf Attention-Gewichten / Dropout on attention weights
+        ModelDimension: int,
+        NumHeads:       int,
+        DropoutRate:    float = 0.1,
     ):
         super().__init__()
         assert ModelDimension % NumHeads == 0, \
             "d_model muss durch NumHeads teilbar sein / d_model must be divisible by NumHeads"
 
-        self.ModelDimension = ModelDimension              # Gesamt-Dimension speichern / Store total dimension
-        self.NumHeads       = NumHeads                    # Anzahl Heads / Number of heads
-        self.HeadDimension  = ModelDimension // NumHeads  # d_k = d_model / H pro Kopf / per head
-        self.ScalingFactor  = math.sqrt(self.HeadDimension)  # √d_k – verhindert zu kleine Gradienten / prevents vanishing gradients
+        self.ModelDimension = ModelDimension 
+        self.NumHeads       = NumHeads 
+        self.HeadDimension  = ModelDimension // NumHeads 
+        self.ScalingFactor  = math.sqrt(self.HeadDimension) 
 
-        # ── Explizite Projektionsmatrizen / Explicit projection matrices ──
-        self.QueryProjection  = nn.Linear(ModelDimension, ModelDimension, bias=False)  # W_Q ∈ ℝ^{d×d}
-        self.KeyProjection    = nn.Linear(ModelDimension, ModelDimension, bias=False)  # W_K ∈ ℝ^{d×d}
-        self.ValueProjection  = nn.Linear(ModelDimension, ModelDimension, bias=False)  # W_V ∈ ℝ^{d×d}
-        self.OutputProjection = nn.Linear(ModelDimension, ModelDimension, bias=False)  # W_O: konkatenierte Heads → d_model
+        self.QueryProjection  = nn.Linear(ModelDimension, ModelDimension, bias=False)
+        self.KeyProjection    = nn.Linear(ModelDimension, ModelDimension, bias=False)
+        self.ValueProjection  = nn.Linear(ModelDimension, ModelDimension, bias=False)
+        self.OutputProjection = nn.Linear(ModelDimension, ModelDimension, bias=False)
+        self.AttentionDropout = nn.Dropout(DropoutRate) 
 
-        self.AttentionDropout = nn.Dropout(DropoutRate)   # Dropout auf normierten Attention-Gewichten / Dropout on normalized weights
-
-        # Attention-Gewichte für Explainability merken / Store attention weights for explainability
-        self.StoredAttentionWeights: Optional[torch.Tensor] = None  # (B, H, T_q, T_k) oder None
+        self.StoredAttentionWeights: Optional[torch.Tensor] = None 
 
     def _SplitIntoHeads(self, Tensor: torch.Tensor) -> torch.Tensor:
-        """
-        (Batch, Seq, d_model) → (Batch, H, Seq, d_k)
-        Teilt d_model in H Köpfe auf / Splits d_model into H heads.
-        """
-        B, T, _ = Tensor.shape                                        # Batch, Sequenz, Dimension
-        Tensor   = Tensor.view(B, T, self.NumHeads, self.HeadDimension)  # (B, T, H, d_k)
-        return Tensor.transpose(1, 2)                                  # (B, H, T, d_k) für Matmul / for matmul
+
+        B, T, _ = Tensor.shape 
+        Tensor   = Tensor.view(B, T, self.NumHeads, self.HeadDimension)
+        return Tensor.transpose(1, 2)
 
     def forward(
         self,
-        QueryInput:    torch.Tensor,                    # Q: (B, T_q, d_model)
-        KeyInput:      torch.Tensor,                    # K: (B, T_k, d_model)
-        ValueInput:    torch.Tensor,                    # V: (B, T_k, d_model)
-        AttentionMask: Optional[torch.Tensor] = None,  # Optionale Maske (0=maskiert) / Optional mask
-    ) -> torch.Tensor:                                  # Ausgabe: (B, T_q, d_model)
-        B = QueryInput.size(0)                          # Batch-Größe / Batch size
+        QueryInput:    torch.Tensor,
+        KeyInput:      torch.Tensor,
+        ValueInput:    torch.Tensor,
+        AttentionMask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        B = QueryInput.size(0)
 
-        # Schritt 1: Lineare Projektion aller drei Matrizen / Step 1: Project all three
-        Q = self._SplitIntoHeads(self.QueryProjection(QueryInput))    # (B, H, T_q, d_k)
-        K = self._SplitIntoHeads(self.KeyProjection(KeyInput))        # (B, H, T_k, d_k)
-        V = self._SplitIntoHeads(self.ValueProjection(ValueInput))    # (B, H, T_k, d_k)
+        Q = self._SplitIntoHeads(self.QueryProjection(QueryInput))
+        K = self._SplitIntoHeads(self.KeyProjection(KeyInput))
+        V = self._SplitIntoHeads(self.ValueProjection(ValueInput))
 
-        # Schritt 2: Skaliertes Skalarprodukt / Step 2: Scaled dot-product
-        AttentionLogits = torch.matmul(Q, K.transpose(-2, -1)) / self.ScalingFactor  # (B, H, T_q, T_k)
+        AttentionLogits = torch.matmul(Q, K.transpose(-2, -1)) / self.ScalingFactor
 
-        if AttentionMask is not None:                                  # Maske anwenden falls vorhanden / Apply mask if given
+        if AttentionMask is not None:
             AttentionLogits = AttentionLogits.masked_fill(AttentionMask == 0, float("-inf"))
 
-        # Schritt 3: Softmax + Dropout / Step 3: Softmax + dropout
-        AttentionWeights = F.softmax(AttentionLogits, dim=-1)          # (B, H, T_q, T_k) – normiert / normalized
-        self.StoredAttentionWeights = AttentionWeights.detach()        # Für Explainability ablegen / Store for explainability
-        AttentionWeights = self.AttentionDropout(AttentionWeights)     # Dropout auf Gewichten / Dropout on weights
+        AttentionWeights = F.softmax(AttentionLogits, dim=-1)
+        self.StoredAttentionWeights = AttentionWeights.detach()
+        AttentionWeights = self.AttentionDropout(AttentionWeights)
 
-        # Schritt 4: Kontextvektor berechnen & Heads zusammenführen / Step 4: Context & merge heads
-        ContextVector = torch.matmul(AttentionWeights, V)              # (B, H, T_q, d_k)
-        ContextVector = ContextVector.transpose(1, 2).contiguous()     # (B, T_q, H, d_k)
-        ContextVector = ContextVector.view(B, -1, self.ModelDimension) # (B, T_q, d_model) konkateniert / concatenated
+        ContextVector = torch.matmul(AttentionWeights, V)
+        ContextVector = ContextVector.transpose(1, 2).contiguous()
+        ContextVector = ContextVector.view(B, -1, self.ModelDimension)
 
-        # Schritt 5: Ausgabeprojektion / Step 5: Output projection
-        return self.OutputProjection(ContextVector)                    # (B, T_q, d_model)
+        return self.OutputProjection(ContextVector)
 
-# ─────────────────────────────────────────────────────────────────────
 
 class PositionwiseFeedForwardNetwork(nn.Module):
-    """
-    Positions-unabhängiges Feed-Forward-Netzwerk (FFN).
-    / Position-wise Feed-Forward Network (FFN).
-    Architektur / Architecture: Linear(d→d_ff) → GELU → Dropout → Linear(d_ff→d) → Dropout
-    """
 
     def __init__(
         self,
-        ModelDimension:   int,          # Eingabe- und Ausgabedimension d_model / Input and output dimension
-        ForwardDimension: int,          # Innere Dimension d_ff (typisch 4×d_model) / Inner dim (typically 4×d_model)
-        DropoutRate:      float = 0.1,  # Dropout-Rate / Dropout rate
+        ModelDimension:   int,
+        ForwardDimension: int,
+        DropoutRate:      float = 0.1,
     ):
         super().__init__()
-        # Explizite Layer-Definitionen / Explicit layer definitions
-        self.FullyConnectedLayer1 = nn.Linear(ModelDimension, ForwardDimension)  # W_1: Expansion d → d_ff
-        self.ActivationFunction   = nn.GELU()                                    # GELU: glattere Gradienten als ReLU / smoother gradients
-        self.DropoutAfterGELU     = nn.Dropout(DropoutRate)                      # Dropout nach Aktivierung / Dropout after activation
-        self.FullyConnectedLayer2 = nn.Linear(ForwardDimension, ModelDimension)  # W_2: Projektion d_ff → d
-        self.DropoutAfterLinear2  = nn.Dropout(DropoutRate)                      # Dropout nach zweiter Schicht / Dropout after second layer
+        self.FullyConnectedLayer1 = nn.Linear(ModelDimension, ForwardDimension)
+        self.ActivationFunction   = nn.GELU()
+        self.DropoutAfterGELU     = nn.Dropout(DropoutRate)
+        self.FullyConnectedLayer2 = nn.Linear(ForwardDimension, ModelDimension)
+        self.DropoutAfterLinear2  = nn.Dropout(DropoutRate)
 
     def forward(self, InputTensor: torch.Tensor) -> torch.Tensor:
-        # (B, T, d_model) → expandieren → aktivieren → komprimieren → (B, T, d_model)
-        HiddenState  = self.FullyConnectedLayer1(InputTensor)   # Expansion / Expansion
-        HiddenState  = self.ActivationFunction(HiddenState)     # Nicht-Linearität / Non-linearity
-        HiddenState  = self.DropoutAfterGELU(HiddenState)       # Regularisierung / Regularization
-        OutputTensor = self.FullyConnectedLayer2(HiddenState)   # Komprimierung / Compression
-        OutputTensor = self.DropoutAfterLinear2(OutputTensor)   # Zweiter Dropout / Second dropout
-        return OutputTensor                                      # (B, T, d_model)
+        HiddenState  = self.FullyConnectedLayer1(InputTensor)
+        HiddenState  = self.ActivationFunction(HiddenState)
+        HiddenState  = self.DropoutAfterGELU(HiddenState)
+        OutputTensor = self.FullyConnectedLayer2(HiddenState)
+        OutputTensor = self.DropoutAfterLinear2(OutputTensor)
+        return OutputTensor 
 
-# ─────────────────────────────────────────────────────────────────────
 
 class ResidualConnectionWithLayerNorm(nn.Module):
-    """
-    Add & Norm (Post-Norm): LayerNorm(x + Dropout(Sublayer(x)))
-    Stabilisiert Gradienten durch Residualverbindung und Normierung.
-    / Stabilizes gradients through residual connection and normalization.
-    """
 
     def __init__(self, ModelDimension: int, DropoutRate: float = 0.1):
         super().__init__()
-        self.LayerNormalization = nn.LayerNorm(ModelDimension)  # Normierung über Feature-Dimension / Norm over feature dim
-        self.ResidualDropout    = nn.Dropout(DropoutRate)       # Dropout auf Sublayer-Ausgabe / Dropout on sublayer output
+        self.LayerNormalization = nn.LayerNorm(ModelDimension) 
+        self.ResidualDropout    = nn.Dropout(DropoutRate)
 
     def forward(self, ResidualInput: torch.Tensor, SubLayerOutput: torch.Tensor) -> torch.Tensor:
-        DroppedOutput = self.ResidualDropout(SubLayerOutput)              # Dropout auf Sublayer / Dropout on sublayer
-        return self.LayerNormalization(ResidualInput + DroppedOutput)     # Add & Norm
+        DroppedOutput = self.ResidualDropout(SubLayerOutput) 
+        return self.LayerNormalization(ResidualInput + DroppedOutput)
 
-# ─────────────────────────────────────────────────────────────────────
 
 class SinusoidalPositionalEncoding(nn.Module):
-    """
-    Sinusoidale Positions-Kodierung nach Vaswani et al. (2017).
-    / Sinusoidal positional encoding per Vaswani et al. (2017).
-    PE(pos, 2i)   = sin(pos / 10000^{2i/d_model})
-    PE(pos, 2i+1) = cos(pos / 10000^{2i/d_model})
-    Nicht lernbar, deterministisch / Non-learnable, deterministic.
-    """
 
     def __init__(
         self,
-        ModelDimension:    int,           # d_model
-        MaxSequenceLength: int = 5000,    # Maximale Sequenzlänge für vorberechnete PE / Max seq len for precomputed PE
-        DropoutRate:       float = 0.1,   # Dropout nach PE-Addition / Dropout after PE addition
+        ModelDimension:    int, 
+        MaxSequenceLength: int = 5000,
+        DropoutRate:       float = 0.1,
     ):
         super().__init__()
-        self.PositionalDropout = nn.Dropout(DropoutRate)                  # Dropout / Dropout rate
+        self.PositionalDropout = nn.Dropout(DropoutRate)
 
-        # PE-Matrix vorberechnen und als Buffer registrieren / Precompute and register as buffer
-        PositionEncodingMatrix = torch.zeros(MaxSequenceLength, ModelDimension)   # (T_max, d)
-        PositionIndices = torch.arange(0, MaxSequenceLength).float().unsqueeze(1)  # (T_max, 1)
-        EvenDimIndices  = torch.arange(0, ModelDimension, 2).float()              # Gerade Dim / Even dims
-        DivisionTerms   = torch.exp(EvenDimIndices * (-math.log(10000.0) / ModelDimension))  # 1/10000^{2i/d}
+        PositionEncodingMatrix = torch.zeros(MaxSequenceLength, ModelDimension) 
+        PositionIndices = torch.arange(0, MaxSequenceLength).float().unsqueeze(1)
+        EvenDimIndices  = torch.arange(0, ModelDimension, 2).float()
+        DivisionTerms   = torch.exp(EvenDimIndices * (-math.log(10000.0) / ModelDimension))
 
-        PositionEncodingMatrix[:, 0::2] = torch.sin(PositionIndices * DivisionTerms)  # Sinus auf gerade / Sine on even
-        PositionEncodingMatrix[:, 1::2] = torch.cos(PositionIndices * DivisionTerms)  # Cosinus auf ungerade / Cosine on odd
-        PositionEncodingMatrix = PositionEncodingMatrix.unsqueeze(0)       # (1, T_max, d) – Batch-Dim hinzufügen / Add batch dim
+        PositionEncodingMatrix[:, 0::2] = torch.sin(PositionIndices * DivisionTerms)
+        PositionEncodingMatrix[:, 1::2] = torch.cos(PositionIndices * DivisionTerms)
+        PositionEncodingMatrix = PositionEncodingMatrix.unsqueeze(0)
 
-        self.register_buffer("PositionEncodingBuffer", PositionEncodingMatrix)  # Kein Parameter, aber persistent / Not a param but persistent
+        self.register_buffer("PositionEncodingBuffer", PositionEncodingMatrix)
 
     def forward(self, EmbeddedInput: torch.Tensor) -> torch.Tensor:
-        # EmbeddedInput: (B, T, d_model)
-        SeqLen = EmbeddedInput.size(1)                                   # Aktuelle Sequenzlänge / Current seq length
-        EncodedInput = EmbeddedInput + self.PositionEncodingBuffer[:, :SeqLen, :]  # PE addieren / Add PE
-        return self.PositionalDropout(EncodedInput)                      # Dropout auf Summe / Dropout on sum
+        SeqLen = EmbeddedInput.size(1)
+        EncodedInput = EmbeddedInput + self.PositionEncodingBuffer[:, :SeqLen, :]
+        return self.PositionalDropout(EncodedInput)
 
-# ─────────────────────────────────────────────────────────────────────
 
 class InputEmbeddingLayer(nn.Module):
-    """
-    Projiziert Rohdaten (B, T, F) → Modell-Raum (B, T, d_model).
-    / Projects raw data (B, T, F) → model space (B, T, d_model).
-    Lineare Projektion + sofortige LayerNorm für stabile Einbettung.
-    / Linear projection + immediate LayerNorm for stable embedding.
-    """
 
     def __init__(self, NumFeatures: int, ModelDimension: int):
         super().__init__()
-        self.FeatureProjectionLayer = nn.Linear(NumFeatures, ModelDimension)  # W_e: F → d_model
-        self.EmbeddingNorm          = nn.LayerNorm(ModelDimension)            # Normierung direkt nach Projektion / Norm right after projection
+        self.FeatureProjectionLayer = nn.Linear(NumFeatures, ModelDimension)
+        self.EmbeddingNorm          = nn.LayerNorm(ModelDimension)
 
     def forward(self, RawInputTensor: torch.Tensor) -> torch.Tensor:
-        # (B, T, F) → lineare Projektion → Normierung → (B, T, d_model)
-        ProjectedTensor = self.FeatureProjectionLayer(RawInputTensor)  # Lineare Projektion / Linear projection
-        return self.EmbeddingNorm(ProjectedTensor)                     # Normiert zurückgeben / Return normalized
+        ProjectedTensor = self.FeatureProjectionLayer(RawInputTensor)
+        return self.EmbeddingNorm(ProjectedTensor)
 
 
 class OutputProjectionLayer(nn.Module):
-    """
-    Projiziert Transformer-Ausgabe zurück in Feature-Raum: (B, T, d_model) → (B, T, F).
-    / Projects transformer output back to feature space: (B, T, d_model) → (B, T, F).
-    """
-
     def __init__(self, ModelDimension: int, NumFeatures: int):
         super().__init__()
-        self.OutputLinearLayer = nn.Linear(ModelDimension, NumFeatures)  # d_model → F
+        self.OutputLinearLayer = nn.Linear(ModelDimension, NumFeatures)
 
     def forward(self, TransformerOutput: torch.Tensor) -> torch.Tensor:
-        return self.OutputLinearLayer(TransformerOutput)  # (B, T, d_model) → (B, T, F)
+        return self.OutputLinearLayer(TransformerOutput)
 
-
-# ============================================================
-# Encoder-Architektur / Encoder Architecture
-# TranADEncoderLayer: ein einzelner Encoder-Block
-# TranADEncoderStack: N gestapelte Encoder-Layer
-# ============================================================
 
 class TranADEncoderLayer(nn.Module):
-    """
-    Ein einzelner Transformer-Encoder-Layer.
-    / A single Transformer encoder layer.
-    Enthält / Contains:
-      1. Multi-Head Self-Attention + Add & Norm
-      2. Positions-weises FFN + Add & Norm
-    Alle Sub-Layer werden explizit im init definiert.
-    / All sub-layers explicitly defined in init.
-    """
 
     def __init__(
         self,
-        ModelDimension:   int,          # d_model
-        NumHeads:         int,          # Anzahl Attention-Köpfe / Number of attention heads
-        ForwardDimension: int,          # Innere FFN-Dimension d_ff / Inner FFN dimension
-        DropoutRate:      float = 0.1,  # Dropout-Rate / Dropout rate
+        ModelDimension:   int,
+        NumHeads:         int,
+        ForwardDimension: int,
+        DropoutRate:      float = 0.1,
     ):
         super().__init__()
-        # ── Sub-Layer 1: Self-Attention ───────────────────────────
         self.SelfAttentionModule   = MultiHeadScaledDotProductAttention(
             ModelDimension, NumHeads, DropoutRate
-        )                                                  # Multi-Head Self-Attention (Q=K=V=x)
+        )
         self.SelfAttentionAddNorm  = ResidualConnectionWithLayerNorm(
             ModelDimension, DropoutRate
-        )                                                  # Add & Norm nach Self-Attention / Add & Norm after self-att
-
-        # ── Sub-Layer 2: Feed-Forward Network ────────────────────
+        )
         self.FeedForwardModule     = PositionwiseFeedForwardNetwork(
             ModelDimension, ForwardDimension, DropoutRate
-        )                                                  # Positions-weises FFN / Position-wise FFN
+        )
         self.FeedForwardAddNorm    = ResidualConnectionWithLayerNorm(
             ModelDimension, DropoutRate
-        )                                                  # Add & Norm nach FFN / Add & Norm after FFN
+        )
 
     def forward(
         self,
-        InputTensor:   torch.Tensor,                    # (B, T, d_model)
-        AttentionMask: Optional[torch.Tensor] = None,  # Optionale Padding-Maske / Optional padding mask
-    ) -> torch.Tensor:                                  # (B, T, d_model)
-        # Sub-Layer 1: Multi-Head Self-Attention
+        InputTensor:   torch.Tensor,
+        AttentionMask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         SelfAttOutput   = self.SelfAttentionModule(
-            InputTensor, InputTensor, InputTensor, AttentionMask  # Q = K = V = gleicher Eingang / Q=K=V=same input
-        )                                               # Attention berechnen / Compute attention
-        AfterSelfAtt    = self.SelfAttentionAddNorm(InputTensor, SelfAttOutput)  # Add & Norm
+            InputTensor, InputTensor, InputTensor, AttentionMask 
+        )
+        AfterSelfAtt    = self.SelfAttentionAddNorm(InputTensor, SelfAttOutput)
 
-        # Sub-Layer 2: Feed-Forward Network
-        FeedForwardOut  = self.FeedForwardModule(AfterSelfAtt)               # FFN anwenden / Apply FFN
-        AfterFFN        = self.FeedForwardAddNorm(AfterSelfAtt, FeedForwardOut)  # Add & Norm
-        return AfterFFN                                 # (B, T, d_model) – Layer-Ausgabe / Layer output
+        FeedForwardOut  = self.FeedForwardModule(AfterSelfAtt) 
+        AfterFFN        = self.FeedForwardAddNorm(AfterSelfAtt, FeedForwardOut)
+        return AfterFFN
 
-# ─────────────────────────────────────────────────────────────────────
 
 class TranADEncoderStack(nn.Module):
-    """
-    Stapel von N Encoder-Layern + finale LayerNorm.
-    / Stack of N encoder layers + final LayerNorm.
-    Wird von beiden Phasen gemeinsam genutzt / Shared by both phases.
-    """
 
     def __init__(
         self,
-        NumLayers:        int,          # N – Anzahl Encoder-Schichten / Number of encoder layers
+        NumLayers:        int,
         ModelDimension:   int,
         NumHeads:         int,
         ForwardDimension: int,
         DropoutRate:      float = 0.1,
     ):
         super().__init__()
-        # N unabhängige Encoder-Layer in ModuleList / N independent layers in ModuleList
         self.EncoderLayerList = nn.ModuleList([
             TranADEncoderLayer(ModelDimension, NumHeads, ForwardDimension, DropoutRate)
-            for _ in range(NumLayers)                   # Jeder Layer hat eigene Gewichte / Each layer has own weights
+            for _ in range(NumLayers)
         ])
-        self.FinalLayerNorm = nn.LayerNorm(ModelDimension)  # Abschlussnorm / Final normalization
+        self.FinalLayerNorm = nn.LayerNorm(ModelDimension)
 
     def forward(
         self,
-        InputTensor:   torch.Tensor,                    # (B, T, d_model)
+        InputTensor:   torch.Tensor,
         AttentionMask: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:                                  # (B, T, d_model) – Encoder-Memory
-        CurrentTensor = InputTensor                     # Startpunkt / Starting point
-        for EncoderLayer in self.EncoderLayerList:      # Sequenziell durch alle N Layer / Sequential through N layers
-            CurrentTensor = EncoderLayer(CurrentTensor, AttentionMask)  # Layer i anwenden / Apply layer i
-        return self.FinalLayerNorm(CurrentTensor)       # Finale Normierung / Final normalization
+    ) -> torch.Tensor:
+        CurrentTensor = InputTensor
+        for EncoderLayer in self.EncoderLayerList:
+            CurrentTensor = EncoderLayer(CurrentTensor, AttentionMask)
+        return self.FinalLayerNorm(CurrentTensor)
 
-
-
-# ============================================================
-# Decoder-Architektur / Decoder Architecture
-# TranADDecoderLayer: ein einzelner Decoder-Block
-# TranADDecoderStack: N gestapelte Decoder-Layer
-# TranAD verwendet ZWEI unabhängige Decoder-Stacks.
-# / TranAD uses TWO independent decoder stacks.
-# ============================================================
 
 class TranADDecoderLayer(nn.Module):
-    """
-    Ein einzelner Transformer-Decoder-Layer mit drei Sub-Layern.
-    / A single Transformer decoder layer with three sub-layers.
-    Enthält / Contains:
-      1. Masked Multi-Head Self-Attention auf Zielsequenz / On target sequence
-      2. Multi-Head Cross-Attention (Q=Decoder, K/V=Encoder-Memory)
-      3. Positions-weises FFN
-    Alle Sub-Layer explizit im init / All sub-layers explicitly in init.
-    """
 
     def __init__(
         self,
@@ -342,57 +237,44 @@ class TranADDecoderLayer(nn.Module):
         DropoutRate:      float = 0.1,
     ):
         super().__init__()
-        # ── Sub-Layer 1: Masked Self-Attention ───────────────────
         self.SelfAttentionModule    = MultiHeadScaledDotProductAttention(
             ModelDimension, NumHeads, DropoutRate
-        )                                               # Self-Attention auf Zielsequenz / Self-att on target
+        )
         self.SelfAttentionAddNorm   = ResidualConnectionWithLayerNorm(ModelDimension, DropoutRate)
 
-        # ── Sub-Layer 2: Cross-Attention ─────────────────────────
         self.CrossAttentionModule   = MultiHeadScaledDotProductAttention(
             ModelDimension, NumHeads, DropoutRate
-        )                                               # Kreuz-Attention: Query=Decoder, Key/Val=Encoder / Cross-att: Q=Dec, K/V=Enc
+        )
         self.CrossAttentionAddNorm  = ResidualConnectionWithLayerNorm(ModelDimension, DropoutRate)
 
-        # ── Sub-Layer 3: Feed-Forward Network ────────────────────
         self.FeedForwardModule      = PositionwiseFeedForwardNetwork(
             ModelDimension, ForwardDimension, DropoutRate
-        )                                               # Positions-weises FFN / Position-wise FFN
+        )
         self.FeedForwardAddNorm     = ResidualConnectionWithLayerNorm(ModelDimension, DropoutRate)
 
     def forward(
         self,
-        TargetTensor:  torch.Tensor,                    # (B, T, d_model) – Decoder-Eingabe / Decoder input
-        EncoderMemory: torch.Tensor,                    # (B, T, d_model) – Encoder-Ausgabe / Encoder output
-        TargetMask:    Optional[torch.Tensor] = None,  # Maske für Self-Attention / Mask for self-att
-        MemoryMask:    Optional[torch.Tensor] = None,  # Maske für Cross-Attention / Mask for cross-att
-    ) -> torch.Tensor:                                  # (B, T, d_model)
-        # Sub-Layer 1: Selbst-Attention auf Zielsequenz / Self-attention on target sequence
+        TargetTensor:  torch.Tensor,
+        EncoderMemory: torch.Tensor,
+        TargetMask:    Optional[torch.Tensor] = None,
+        MemoryMask:    Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         SelfAttOutput  = self.SelfAttentionModule(
-            TargetTensor, TargetTensor, TargetTensor, TargetMask  # Q=K=V=Ziel / Q=K=V=target
+            TargetTensor, TargetTensor, TargetTensor, TargetMask
         )
-        AfterSelfAtt   = self.SelfAttentionAddNorm(TargetTensor, SelfAttOutput)  # Add & Norm
+        AfterSelfAtt   = self.SelfAttentionAddNorm(TargetTensor, SelfAttOutput)
 
-        # Sub-Layer 2: Kreuz-Attention mit Encoder-Memory / Cross-attention with encoder memory
         CrossAttOutput = self.CrossAttentionModule(
-            AfterSelfAtt, EncoderMemory, EncoderMemory, MemoryMask  # Q=Decoder-Zustand, K=V=Encoder-Memory
+            AfterSelfAtt, EncoderMemory, EncoderMemory, MemoryMask
         )
-        AfterCrossAtt  = self.CrossAttentionAddNorm(AfterSelfAtt, CrossAttOutput)  # Add & Norm
+        AfterCrossAtt  = self.CrossAttentionAddNorm(AfterSelfAtt, CrossAttOutput)
 
-        # Sub-Layer 3: Feed-Forward Network
-        FeedForwardOut = self.FeedForwardModule(AfterCrossAtt)               # FFN / FFN
-        AfterFFN       = self.FeedForwardAddNorm(AfterCrossAtt, FeedForwardOut)  # Add & Norm
-        return AfterFFN                                 # (B, T, d_model)
+        FeedForwardOut = self.FeedForwardModule(AfterCrossAtt)
+        AfterFFN       = self.FeedForwardAddNorm(AfterCrossAtt, FeedForwardOut)
+        return AfterFFN
 
-# ─────────────────────────────────────────────────────────────────────
 
 class TranADDecoderStack(nn.Module):
-    """
-    Stapel von N Decoder-Layern + finale LayerNorm.
-    / Stack of N decoder layers + final LayerNorm.
-    TranAD instanziiert ZWEI dieser Stacks (DecoderStack1, DecoderStack2).
-    / TranAD instantiates TWO of these stacks (DecoderStack1, DecoderStack2).
-    """
 
     def __init__(
         self,
@@ -405,118 +287,84 @@ class TranADDecoderStack(nn.Module):
         super().__init__()
         self.DecoderLayerList = nn.ModuleList([
             TranADDecoderLayer(ModelDimension, NumHeads, ForwardDimension, DropoutRate)
-            for _ in range(NumLayers)                   # N unabhängige Layer / N independent layers
+            for _ in range(NumLayers)
         ])
-        self.FinalLayerNorm   = nn.LayerNorm(ModelDimension)  # Abschlussnorm / Final norm
+        self.FinalLayerNorm   = nn.LayerNorm(ModelDimension)
 
     def forward(
         self,
-        TargetTensor:  torch.Tensor,                    # (B, T, d_model)
-        EncoderMemory: torch.Tensor,                    # (B, T, d_model)
+        TargetTensor:  torch.Tensor,
+        EncoderMemory: torch.Tensor,
         TargetMask:    Optional[torch.Tensor] = None,
         MemoryMask:    Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:                                  # (B, T, d_model)
-        CurrentTensor = TargetTensor                    # Startpunkt / Starting point
-        for DecoderLayer in self.DecoderLayerList:      # Sequenziell durch alle Layer / Sequential through all layers
+    ) -> torch.Tensor:
+        CurrentTensor = TargetTensor
+        for DecoderLayer in self.DecoderLayerList:
             CurrentTensor = DecoderLayer(
-                CurrentTensor, EncoderMemory, TargetMask, MemoryMask  # Layer anwenden / Apply layer
+                CurrentTensor, EncoderMemory, TargetMask, MemoryMask
             )
-        return self.FinalLayerNorm(CurrentTensor)       # Finale Normierung / Final normalization
+        return self.FinalLayerNorm(CurrentTensor)
 
 
-
-
-# ============================================================
-# TranADModel: vollständiges Netzwerk 
-# Zweiphasige Architektur:
-#   Phase 1: Encoder → Decoder1(x_embedded) → x1
-#   Phase 2: Encoder → Decoder2(x1_embedded) → x2  (adversariell)
-# Loss: L = (1/φ)·||x-x1||² + φ·||x-x2||²
-# φ (FocusScore) wächst mit jeder Epoche 
-# ============================================================
 
 class TranADModel(nn.Module):
-    """
-    Kern-Netzwerk des TranAD-Modells.
-    / Core network of the TranAD model.
-
-    Alle Layer, Optimizer, Scheduler und Loss explizit im __init__.
-    / All layers, optimizer, scheduler and loss explicitly in __init__.
-
-    Architektur / Architecture:
-      InputEmbeddingLayer  → SinusoidalPositionalEncoding
-      → TranADEncoderStack (gemeinsam für beide Phasen / shared)
-      → TranADDecoderStack1  (Phase 1)  → OutputProjectionLayer1 → x1
-      → TranADDecoderStack2  (Phase 2)  → OutputProjectionLayer2 → x2
-    """
+    """ Core network of the TranAD model"""
 
     def __init__(
         self,
-        # Hier kann getuned werden / Tunable hyperparameters
-        NumFeatures:         int,             # F – Anzahl Eingabe-Features / Number of input features
-        ModelDimension:      int   = 64,      # d_model – Transformer-Dimension / Transformer dimension
-        NumHeads:            int   = 4,       # H – Attention-Köpfe / Attention heads
-        NumEncoderLayers:    int   = 3,       # N_e – Encoder-Tiefe / Encoder depth
-        NumDecoderLayers:    int   = 3,       # N_d – Tiefe jedes Decoders / Depth of each decoder
-        ForwardDimension:    int   = 256,     # d_ff – FFN-Innendimension / FFN inner dimension
-        DropoutRate:         float = 0.1,     # Dropout-Rate / Dropout rate
-        MaxSequenceLength:   int   = 5000,    # Maximale PE-Länge / Maximum PE length
-        LearningRate:        float = 1e-4,    # Adam-Lernrate / Adam learning rate
-        WeightDecay:         float = 1e-5,    # L2-Regularisierung / L2 regularization
-        LRSchedulerPatience: int   = 10,      # Geduld für ReduceLROnPlateau / Patience for scheduler
-        LRSchedulerFactor:   float = 0.5,     # Reduktionsfaktor LR / LR reduction factor
+        NumFeatures:         int,
+        ModelDimension:      int   = 64,
+        NumHeads:            int   = 4,
+        NumEncoderLayers:    int   = 3,
+        NumDecoderLayers:    int   = 3,
+        ForwardDimension:    int   = 256,
+        DropoutRate:         float = 0.1,
+        MaxSequenceLength:   int   = 5000,
+        LearningRate:        float = 1e-4,
+        WeightDecay:         float = 1e-5,
+        LRSchedulerPatience: int   = 10,
+        LRSchedulerFactor:   float = 0.5,
     ):
         super().__init__()
-        self.NumFeatures    = NumFeatures     # Feature-Anzahl merken / Store feature count
-        self.ModelDimension = ModelDimension  # d_model merken / Store d_model
+        self.NumFeatures    = NumFeatures
+        self.ModelDimension = ModelDimension
 
-        # ── Gemeinsame Einbettungs-Schichten / Shared embedding layers ──
         self.InputEmbeddingLayer     = InputEmbeddingLayer(NumFeatures, ModelDimension)
-        # Projiziert F Features → d_model / Projects F features → d_model
-
         self.PositionalEncodingLayer = SinusoidalPositionalEncoding(
             ModelDimension, MaxSequenceLength, DropoutRate
-        )                                             # Sinusoidale PE / Sinusoidal PE
+        )
 
-        # ── Gemeinsamer Encoder (geteilt von Phase 1 & 2) / Shared encoder ──
         self.EncoderStack = TranADEncoderStack(
             NumEncoderLayers, ModelDimension, NumHeads, ForwardDimension, DropoutRate
-        )                                             # Encoder für kontextuelles Gedächtnis / Encoder for contextual memory
+        )
 
-        # ── Normierung des Decoder-Eingangs / Decoder input normalization ──
-        self.DecoderInputNorm = nn.LayerNorm(ModelDimension)  # Normiert eingebetteten Decoder-Eingang / Normalizes embedded decoder input
+        self.DecoderInputNorm = nn.LayerNorm(ModelDimension)
 
-        # ── Decoder 1 – Phase 1 (direkte Rekonstruktion / direct reconstruction) ──
         self.DecoderStack1    = TranADDecoderStack(
             NumDecoderLayers, ModelDimension, NumHeads, ForwardDimension, DropoutRate
-        )                                             # Decoder für Phase 1 / Decoder for Phase 1
+        )
         self.OutputProjection1 = OutputProjectionLayer(ModelDimension, NumFeatures)
-        # Projiziert d_model → F für Rekonstruktion x1 / Projects d_model → F for x1
 
-        # ── Decoder 2 – Phase 2 (adversarielle Verfeinerung / adversarial refinement) ──
         self.DecoderStack2    = TranADDecoderStack(
             NumDecoderLayers, ModelDimension, NumHeads, ForwardDimension, DropoutRate
-        )                                             # Decoder für Phase 2 / Decoder for Phase 2
+        )
         self.OutputProjection2 = OutputProjectionLayer(ModelDimension, NumFeatures)
-        # Projiziert d_model → F für Rekonstruktion x2 / Projects d_model → F for x2
         
         self.Optimizer = torch.optim.Adam(
-            self.parameters(),           # Alle Netzgewichte / All network weights
-            lr           = LearningRate, # Initiale Lernrate / Initial learning rate
-            weight_decay = WeightDecay,  # L2-Regularisierung / L2 regularization
-        )                                # Adam für adaptives Lernen / Adam for adaptive learning
+            self.parameters(),
+            lr           = LearningRate,
+            weight_decay = WeightDecay,
+        )
 
         self.LRScheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.Optimizer,
-            mode     = "min",                   # Verlust minimieren / Minimize loss
-            factor   = LRSchedulerFactor,       # LR × factor bei Plateau / LR × factor on plateau
-            patience = LRSchedulerPatience,     # Epochen ohne Verbesserung / Epochs without improvement
-        )                                       # LR automatisch reduzieren / Auto-reduce LR
+            mode     = "min",
+            factor   = LRSchedulerFactor,
+            patience = LRSchedulerPatience,
+        )
 
         self.ReconstructionLoss = nn.MSELoss(reduction="none")
-        # Element-weiser MSE für feature-spezifische Anomalie-Scores / Element-wise MSE for per-feature scores
 
-        # Gewichte initialisieren / Initialize weights
         self._InitializeWeights()
         ParamCount = sum(p.numel() for p in self.parameters())
         print(
@@ -525,140 +373,93 @@ class TranADModel(nn.Module):
         )
 
     def _InitializeWeights(self) -> None:
-        """
-        Xavier-Uniform für alle linearen Schichten, Null-Bias.
-        / Xavier uniform for all linear layers, zero bias.
-        Sorgt für ausgeglichene Anfangs-Gradienten / Ensures balanced initial gradients.
-        """
         for Module in self.modules():
-            if isinstance(Module, nn.Linear):          # Nur lineare Schichten / Only linear layers
-                nn.init.xavier_uniform_(Module.weight) # Gewichte gleichverteilt initialisieren / Init weights
+            if isinstance(Module, nn.Linear):
+                nn.init.xavier_uniform_(Module.weight)
                 if Module.bias is not None:
-                    nn.init.zeros_(Module.bias)        # Bias = 0 / Bias = 0
+                    nn.init.zeros_(Module.bias)
 
-    def _EmbedAndEncode(
-        self, InputTensor: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Gemeinsamer Einbettungs- und Encoder-Schritt für beide Phasen.
-        / Shared embedding and encoding step for both phases.
-        Rückgabe / Returns: (EmbeddedWithPE, EncoderMemory) – beide (B, T, d_model)
-        """
-        Embedded      = self.InputEmbeddingLayer(InputTensor)      # F → d_model
-        WithPE        = self.PositionalEncodingLayer(Embedded)     # + Positions-Encoding / + positional encoding
-        EncoderMemory = self.EncoderStack(WithPE)                  # Encoder-Durchlauf / Encoder pass
-        return WithPE, EncoderMemory                               # Einbettung und Gedächtnis / Embedding and memory
+    def _EmbedAndEncode(self, InputTensor: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        Embedded      = self.InputEmbeddingLayer(InputTensor)
+        WithPE        = self.PositionalEncodingLayer(Embedded)
+        EncoderMemory = self.EncoderStack(WithPE)
+        return WithPE, EncoderMemory
 
     def forward(
         self,
-        InputTensor: torch.Tensor,                                 # (B, T, F) – Eingangssequenz / Input sequence
-    ) -> Tuple[torch.Tensor, torch.Tensor]:                        # (x1, x2) – beide Rekonstruktionen
-        """
-        Zweiphasiger TranAD-Forward-Pass / Two-phase TranAD forward pass.
+        InputTensor: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
 
-        Phase 1: InputTensor → embed → encode → Decoder1 → x1
-        Phase 2: x1           → embed → Decoder2(mit Encoder-Memory) → x2
-        """
-        # ── PHASE 1: direkte Rekonstruktion / direct reconstruction ──
         EmbeddedWithPE, EncoderMemory = self._EmbedAndEncode(InputTensor)
-        # EmbeddedWithPE: (B, T, d_model), EncoderMemory: (B, T, d_model)
 
-        NormedDecInput1  = self.DecoderInputNorm(EmbeddedWithPE)  # Decoder-Eingang normieren / Normalize decoder input
-        DecoderOutput1   = self.DecoderStack1(NormedDecInput1, EncoderMemory)   # Decoder-1-Pass / Decoder-1 pass
-        Reconstruction1  = self.OutputProjection1(DecoderOutput1)               # (B, T, F) → x1
+        NormedDecInput1  = self.DecoderInputNorm(EmbeddedWithPE)
+        DecoderOutput1   = self.DecoderStack1(NormedDecInput1, EncoderMemory)
+        Reconstruction1  = self.OutputProjection1(DecoderOutput1)
 
-        # ── PHASE 2: adversarielle Verfeinerung / adversarial refinement ──
-        # x1 (detached) wird als Decoder-2-Eingabe eingebettet
-        # x1 (detached) is embedded as Decoder-2 input
-        EmbeddedRec1     = self.InputEmbeddingLayer(Reconstruction1.detach())   # x1 einbetten, kein Gradient durch Phase 1 / embed x1, no grad through Phase 1
-        WithPERec1       = self.PositionalEncodingLayer(EmbeddedRec1)            # + PE für x1
-        NormedDecInput2  = self.DecoderInputNorm(WithPERec1)                    # Decoder-2-Eingang normieren / Normalize
+        EmbeddedRec1     = self.InputEmbeddingLayer(Reconstruction1.detach())
+        WithPERec1       = self.PositionalEncodingLayer(EmbeddedRec1)
+        NormedDecInput2  = self.DecoderInputNorm(WithPERec1)
 
-        DecoderOutput2   = self.DecoderStack2(NormedDecInput2, EncoderMemory)   # Decoder-2-Pass (Encoder-Memory geteilt!) / Decoder-2 pass (shared encoder memory!)
-        Reconstruction2  = self.OutputProjection2(DecoderOutput2)               # (B, T, F) → x2
+        DecoderOutput2   = self.DecoderStack2(NormedDecInput2, EncoderMemory)
+        Reconstruction2  = self.OutputProjection2(DecoderOutput2)
 
-        return Reconstruction1, Reconstruction2  # Beide Rekonstruktionen zurückgeben / Return both reconstructions
+        return Reconstruction1, Reconstruction2
 
     def ComputeTranADLoss(
         self,
-        OriginalInput:   torch.Tensor,   # (B, T, F) – Original-Eingang / Original input
-        Reconstruction1: torch.Tensor,   # (B, T, F) – Phase-1-Ausgabe x1
-        Reconstruction2: torch.Tensor,   # (B, T, F) – Phase-2-Ausgabe x2
-        FocusScore:      float,           # φ – steigt mit Epoche / increases with epoch
+        OriginalInput:   torch.Tensor,
+        Reconstruction1: torch.Tensor,
+        Reconstruction2: torch.Tensor,
+        FocusScore:      float,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        TranAD-Verlustfunktion / TranAD loss function.
+        TranAD loss function.
         L = (1/φ) · ||x - x1||² + φ · ||x - x2||²
-
-        Für kleine φ (frühe Epochen): Phase 1 dominiert → stabiles Lernen.
-        For small φ (early epochs): Phase 1 dominates → stable learning.
-        Für große φ (späte Epochen): Phase 2 dominiert → adversarielle Schärfung.
-        For large φ (late epochs): Phase 2 dominates → adversarial sharpening.
-
-        Rückgabe / Returns: (skalarer TotalLoss, ErrorPerTimestep (B, T) für Scoring)
         """
-        Error1 = self.ReconstructionLoss(Reconstruction1, OriginalInput)   # (B, T, F) Phase-1-Fehler / Phase-1 error
-        Error2 = self.ReconstructionLoss(Reconstruction2, OriginalInput)   # (B, T, F) Phase-2-Fehler / Phase-2 error
+        Error1 = self.ReconstructionLoss(Reconstruction1, OriginalInput)
+        Error2 = self.ReconstructionLoss(Reconstruction2, OriginalInput)
 
-        PhiSafe        = max(FocusScore, 1e-6)                              # φ gegen Division durch Null / φ against div-by-zero
-        WeightedError1 = Error1 * (1.0 / PhiSafe)                          # (1/φ) · E1 – Phase-1-Gewichtung / Phase-1 weight
-        WeightedError2 = Error2 * float(FocusScore)                         # φ · E2 – Phase-2-Gewichtung / Phase-2 weight
-        CombinedError  = WeightedError1 + WeightedError2                    # Gesamtfehler / Total error
+        PhiSafe        = max(FocusScore, 1e-6) 
+        WeightedError1 = Error1 * (1.0 / PhiSafe)
+        WeightedError2 = Error2 * float(FocusScore)
+        CombinedError  = WeightedError1 + WeightedError2
 
-        TotalLoss        = CombinedError.mean()                             # Skalarer Gesamtverlust / Scalar total loss
-        ErrorPerTimestep = Error2.mean(dim=-1)                              # (B, T) – Feature-gemittelter Phase-2-Fehler / Feature-mean Phase-2 error
+        TotalLoss        = CombinedError.mean()
+        ErrorPerTimestep = Error2.mean(dim=-1)
         return TotalLoss, ErrorPerTimestep
 
 
-
-
-
-# ============================================================
-# TranADMainModel: Orchestrierungsklasse
-# Kapselt TranADModel und stellt die vollständige API bereit:
-# TrainingStep, TrainModel, DetectAnomalies, Evaluate, Save, Load
-# ============================================================
-
+# TranAD Main Model combines everything
 class TranADMainModel:
     """
-    Zentrale Orchestrierungsklasse für TranAD.
-    / Central orchestration class for TranAD.
-
-    Kein nn.Module – verwaltet das TranADModel intern.
-    / Not an nn.Module – manages the TranADModel internally.
-
-    φ (FocusScore) wächst nach jeder Epoche:
-    / φ (FocusScore) grows after each epoch:
-    φ ← min(φ × FocusGrowthRate, MaxFocusScore)
+    TranAD: A Transformer-based Anomaly Detection Model for Multivariate Time Series
     """
 
     def __init__(
         self,
-        # Hier können getuned werden
-        NumFeatures:         int,             # Anzahl Features / Number of features
-        ModelDimension:      int   = 64,      # d_model
-        NumHeads:            int   = 4,       # Attention-Köpfe / Attention heads
-        NumEncoderLayers:    int   = 3,       # Encoder-Tiefe / Encoder depth
-        NumDecoderLayers:    int   = 3,       # Decoder-Tiefe / Decoder depth
-        ForwardDimension:    int   = 256,     # FFN-Dimension / FFN dimension
-        DropoutRate:         float = 0.1,     # Dropout / Dropout rate
-        LearningRate:        float = 1e-4,    # Adam-Lernrate / Adam LR
-        WeightDecay:         float = 1e-5,    # L2-Regularisierung / L2 regularization
-        LRSchedulerPatience: int   = 10,      # Scheduler-Geduld / Scheduler patience
-        FocusGrowthRate:     float = 1.2,     # φ wächst jede Epoche um diesen Faktor / φ grows by this factor each epoch
-        InitialFocusScore:   float = 1.0,     # Startwert von φ / Initial value of φ
-        MaxFocusScore:       float = 100.0,   # Maximaler φ-Wert / Maximum φ value
-        AnomalyPercentile:   float = 95.0,    # Perzentil für Anomalie-Schwellenwert / Percentile for threshold
+        NumFeatures:         int,
+        ModelDimension:      int   = 64,
+        NumHeads:            int   = 4,
+        NumEncoderLayers:    int   = 3,
+        NumDecoderLayers:    int   = 3,
+        ForwardDimension:    int   = 256,
+        DropoutRate:         float = 0.1,
+        LearningRate:        float = 1e-4,
+        WeightDecay:         float = 1e-5,
+        LRSchedulerPatience: int   = 10,
+        FocusGrowthRate:     float = 1.2,
+        InitialFocusScore:   float = 1.0,
+        MaxFocusScore:       float = 100.0,
+        AnomalyPercentile:   float = 95.0,
         Device:              Optional[torch.device] = None,
     ):
-        self.Device          = Device if Device is not None else DEVICE  # Rechengerät / Compute device
-        self.FocusScore      = InitialFocusScore   # φ = 1.0 zu Beginn / φ = 1.0 initially
-        self.FocusGrowthRate = FocusGrowthRate     # Wachstumsfaktor pro Epoche / Growth factor per epoch
-        self.MaxFocusScore   = MaxFocusScore        # Obere Schranke für φ / Upper bound for φ
-        self.AnomalyPercentile = AnomalyPercentile  # Perzentil für Schwellenwert / Percentile for threshold
-        self.AnomalyThreshold  = None               # Wird bei DetectAnomalies befüllt / Filled during DetectAnomalies
+        self.Device          = Device if Device is not None else DEVICE
+        self.FocusScore      = InitialFocusScore 
+        self.FocusGrowthRate = FocusGrowthRate
+        self.MaxFocusScore   = MaxFocusScore 
+        self.AnomalyPercentile = AnomalyPercentile
+        self.AnomalyThreshold  = None 
 
-        # ── TranADModel instanziieren / Instantiate TranADModel ──
         self.Network = TranADModel(
             NumFeatures          = NumFeatures,
             ModelDimension       = ModelDimension,
@@ -670,66 +471,53 @@ class TranADMainModel:
             LearningRate         = LearningRate,
             WeightDecay          = WeightDecay,
             LRSchedulerPatience  = LRSchedulerPatience,
-        ).to(self.Device)                          # Netzwerk auf Gerät verschieben / Move to device
+        ).to(self.Device)
 
-        # ── Verlaufsprotokoll / Training history log ──────────────
         self.TrainingHistory: Dict[str, List[float]] = {
-            "TotalLoss":  [],    # Gesamtverlust pro Epoche / Total loss per epoch
-            "FocusScore": [],    # φ-Wert pro Epoche / φ value per epoch
+            "TotalLoss":  [],
+            "FocusScore": [],
         }
 
-    # ──────────────────────────────────────────────────────────────
     def TrainingStep(self, WindowBatch: torch.Tensor) -> float:
-        """
-        Einen vollständigen Trainingsschritt ausführen.
-        / Execute one complete training step.
-        Forward → TranAD-Loss → Backward → Gradient-Clipping → Optimizer-Update.
-        Rückgabe / Returns: skalarer Loss-Wert / scalar loss value.
-        """
-        self.Network.train()                           # Trainingsmodus (Dropout aktiv) / Training mode (dropout active)
-        WindowBatch = WindowBatch.to(self.Device)      # Batch auf Gerät verschieben / Move batch to device
+        
+        self.Network.train()
+        WindowBatch = WindowBatch.to(self.Device)
 
-        self.Network.Optimizer.zero_grad()             # Gradienten aus letztem Schritt löschen / Clear previous gradients
-        Reconstruction1, Reconstruction2 = self.Network(WindowBatch)  # Zweiphasiger Forward-Pass / Two-phase forward
+        self.Network.Optimizer.zero_grad()
+        Reconstruction1, Reconstruction2 = self.Network(WindowBatch)
         TotalLoss, _ = self.Network.ComputeTranADLoss(
             WindowBatch, Reconstruction1, Reconstruction2, self.FocusScore
-        )                                              # TranAD-Loss mit aktuellem φ / TranAD loss with current φ
-        TotalLoss.backward()                           # Gradienten berechnen / Compute gradients
-        nn.utils.clip_grad_norm_(self.Network.parameters(), max_norm=1.0)  # Gradient Clipping für Stabilität / Gradient clipping for stability
-        self.Network.Optimizer.step()                  # Gewichte aktualisieren / Update weights
-        return TotalLoss.item()                        # Skalaren Wert zurückgeben / Return scalar value
+        )
+        TotalLoss.backward()
+        nn.utils.clip_grad_norm_(self.Network.parameters(), max_norm=1.0)
+        self.Network.Optimizer.step()
+        return TotalLoss.item()
 
-    # ──────────────────────────────────────────────────────────────
+
     def TrainModel(
         self,
-        TrainingLoader: DataLoader,   # DataLoader mit Trainingsdaten / DataLoader with training data
-        NumEpochs:      int = 50,     # Gesamtanzahl Epochen / Total number of epochs
-        PrintInterval:  int = 5,      # Ausgabe-Intervall / Print interval
+        TrainingLoader: DataLoader,
+        NumEpochs:      int = 50,
+        PrintInterval:  int = 5,
     ) -> None:
-        """
-        Vollständiges Training über NumEpochs Epochen.
-        / Complete training over NumEpochs epochs.
-        Nach jeder Epoche: φ-Update + LR-Scheduler-Schritt.
-        / After each epoch: φ-update + LR-scheduler step.
-        """
-        for Epoch in range(1, NumEpochs + 1):          # Epochen 1 bis NumEpochs / Epochs 1 to NumEpochs
-            EpochLossValues: List[float] = []           # Batch-Verluste dieser Epoche / Batch losses this epoch
 
-            for WindowBatch, _ in TrainingLoader:       # Durch alle Batches / Through all batches
-                BatchLoss = self.TrainingStep(WindowBatch)  # Einen Schritt / One step
-                EpochLossValues.append(BatchLoss)       # Loss sammeln / Collect loss
+        for Epoch in range(1, NumEpochs + 1):
+            EpochLossValues: List[float] = []
 
-            AverageLoss = float(np.mean(EpochLossValues))   # Epochen-Durchschnitt / Epoch average
-            self.TrainingHistory["TotalLoss"].append(AverageLoss)    # Im Verlauf speichern / Store in history
-            self.TrainingHistory["FocusScore"].append(self.FocusScore)  # φ speichern / Store φ
+            for WindowBatch, _ in TrainingLoader:
+                BatchLoss = self.TrainingStep(WindowBatch)
+                EpochLossValues.append(BatchLoss)
 
-            self.Network.LRScheduler.step(AverageLoss)  # LR-Scheduler informieren / Inform LR scheduler
+            AverageLoss = float(np.mean(EpochLossValues))
+            self.TrainingHistory["TotalLoss"].append(AverageLoss)
+            self.TrainingHistory["FocusScore"].append(self.FocusScore)
 
-            # φ erhöhen: Phase-2-Gewichtung wird stärker / Increase φ: Phase-2 weight increases
+            self.Network.LRScheduler.step(AverageLoss)
+
             self.FocusScore = min(self.FocusScore * self.FocusGrowthRate, self.MaxFocusScore)
 
             if Epoch % PrintInterval == 0 or Epoch == 1:
-                CurrentLR = self.Network.Optimizer.param_groups[0]["lr"]  # Aktuelle LR lesen / Read current LR
+                CurrentLR = self.Network.Optimizer.param_groups[0]["lr"]
                 print(
                     f"Epoche {Epoch:>4}/{NumEpochs} | "
                     f"Loss={AverageLoss:.5f} | "
@@ -737,64 +525,41 @@ class TranADMainModel:
                     f"LR={CurrentLR:.2e}"
                 )
 
-        self.Network.eval()   # Eval-Modus nach Training / Eval mode after training
+        self.Network.eval()
         print("Training complete.")
 
-    # ──────────────────────────────────────────────────────────────
+
     @torch.no_grad()
     def CalculateScores(
         self,
         DataLoaderObject: DataLoader,
     ) -> np.ndarray:
         """
-        Calculates one anomaly score per ECG record.
-
-        The score is the mean Phase-2 reconstruction error,
-        averaged over all features and timesteps.
-
-        Returns:
-            Scores with shape (number_of_records,)
+        Calculates one anomaly score per ECG record
         """
 
         self.Network.eval()
-
         AllWindowScores: List[np.ndarray] = []
 
         for WindowBatch, _ in DataLoaderObject:
-
             WindowBatch = WindowBatch.to(
                 self.Device
             )
 
-            # TranAD returns Phase-1 and Phase-2 reconstructions.
-            # The current implementation uses Phase 2 for scoring.
             _, Reconstruction2 = self.Network(
                 WindowBatch
             )
 
-            # First average over the 12 ECG leads,
-            # then average over the 1000 timesteps.
             WindowScores = (
-                (Reconstruction2 - WindowBatch) ** 2
-            ).mean(
-                dim=-1
-            ).mean(
-                dim=-1
-            )
+                # Compute the mean squared error across features, then across time steps
+                (Reconstruction2 - WindowBatch) ** 2).mean(dim=-1).mean(dim=-1)
 
-            AllWindowScores.append(
-                WindowScores.cpu().numpy()
-            )
+            AllWindowScores.append(WindowScores.cpu().numpy())
 
-        Scores = np.concatenate(
-            AllWindowScores,
-            axis=0,
-        )
-
+        Scores = np.concatenate(AllWindowScores, axis=0)
         return Scores
 
 
-    # ──────────────────────────────────────────────────────────────
     @torch.no_grad()
     def DetectAnomalies(
         self,
@@ -803,171 +568,56 @@ class TranADMainModel:
         Percentile: Optional[float] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Calculates anomaly scores and applies a threshold.
-
-        Threshold priority:
-            1. Explicit Threshold argument
-            2. Stored self.AnomalyThreshold
-            3. Percentile fallback
+        Calculates anomaly scores and applies a threshold
         """
 
-        AllScores = self.CalculateScores(
-            DataLoaderObject=TestLoader
-        )
+        AllScores = self.CalculateScores(DataLoaderObject=TestLoader)
 
         if Threshold is not None:
-
-            ThresholdValue = float(
-                Threshold
-            )
+            ThresholdValue = float(Threshold)
 
         elif self.AnomalyThreshold is not None:
-
-            ThresholdValue = float(
-                self.AnomalyThreshold
-            )
+            ThresholdValue = float(self.AnomalyThreshold)
 
         else:
-
-            UsedPercentile = (
-                Percentile
-                if Percentile is not None
-                else self.AnomalyPercentile
-            )
-
-            ThresholdValue = float(
-                np.percentile(
-                    AllScores,
-                    UsedPercentile,
-                )
-            )
+            UsedPercentile = (Percentile if Percentile is not None else self.AnomalyPercentile)
+            ThresholdValue = float(np.percentile( AllScores, UsedPercentile))
 
         self.AnomalyThreshold = ThresholdValue
-
-        BinaryLabels = (
-            AllScores >= ThresholdValue
-        ).astype(int)
+        BinaryLabels = (AllScores >= ThresholdValue).astype(int)
 
         return AllScores, BinaryLabels
 
-    # ──────────────────────────────────────────────────────────────
     def Evaluate(
         self,
         TrueLabels: np.ndarray,
         Scores: np.ndarray,
         PredictedLabels: np.ndarray,
     ) -> dict[str, float | int]:
-        """
-        Evaluates already calculated scores and predictions.
 
-        This method does not run inference again and does not
-        calculate another threshold.
-        """
+        TrueLabels = np.asarray(TrueLabels).astype(int).reshape(-1)
+        Scores = np.asarray(Scores).reshape(-1)
+        PredictedLabels = np.asarray(PredictedLabels).astype(int).reshape(-1)
 
-        TrueLabels = np.asarray(
-            TrueLabels
-        ).astype(int).reshape(-1)
-
-        Scores = np.asarray(
-            Scores
-        ).reshape(-1)
-
-        PredictedLabels = np.asarray(
-            PredictedLabels
-        ).astype(int).reshape(-1)
-
-        if not (
-            len(TrueLabels)
-            == len(Scores)
-            == len(PredictedLabels)
-        ):
+        if not (len(TrueLabels) == len(Scores) == len(PredictedLabels)):
             raise ValueError(
                 "TrueLabels, Scores and PredictedLabels "
                 "must have the same length."
             )
 
-        TruePositive = int(
-            (
-                (PredictedLabels == 1)
-                & (TrueLabels == 1)
-            ).sum()
-        )
+        TruePositive = int(((PredictedLabels == 1) & (TrueLabels == 1)).sum())
+        TrueNegative = int(((PredictedLabels == 0) & (TrueLabels == 0)).sum())
+        FalsePositive = int(((PredictedLabels == 1) & (TrueLabels == 0)).sum())
+        FalseNegative = int(((PredictedLabels == 0) & (TrueLabels == 1)).sum())
 
-        TrueNegative = int(
-            (
-                (PredictedLabels == 0)
-                & (TrueLabels == 0)
-            ).sum()
-        )
-
-        FalsePositive = int(
-            (
-                (PredictedLabels == 1)
-                & (TrueLabels == 0)
-            ).sum()
-        )
-
-        FalseNegative = int(
-            (
-                (PredictedLabels == 0)
-                & (TrueLabels == 1)
-            ).sum()
-        )
-
-        Precision = (
-            TruePositive
-            / (
-                TruePositive
-                + FalsePositive
-                + 1e-9
-            )
-        )
-
-        Recall = (
-            TruePositive
-            / (
-                TruePositive
-                + FalseNegative
-                + 1e-9
-            )
-        )
-
-        F1Score = (
-            2
-            * Precision
-            * Recall
-            / (
-                Precision
-                + Recall
-                + 1e-9
-            )
-        )
-
-        Accuracy = (
-            TruePositive
-            + TrueNegative
-        ) / (
-            TruePositive
-            + TrueNegative
-            + FalsePositive
-            + FalseNegative
-            + 1e-9
-        )
-
-        FalseNegativeRate = (
-            FalseNegative
-            / (
-                FalseNegative
-                + TruePositive
-                + 1e-9
-            )
-        )
+        Precision = (TruePositive / (TruePositive + FalsePositive + 1e-9))
+        Recall = (TruePositive / (TruePositive + FalseNegative + 1e-9))
+        F1Score = (2 * Precision * Recall / (Precision + Recall + 1e-9))
+        Accuracy = (TruePositive + TrueNegative) / (TruePositive + TrueNegative + FalsePositive + FalseNegative + 1e-9)
+        FalseNegativeRate = (FalseNegative / (FalseNegative + TruePositive + 1e-9))
 
         ThresholdValue = (
-            round(
-                float(self.AnomalyThreshold),
-                6,
-            )
+            round(float(self.AnomalyThreshold), 6)
             if self.AnomalyThreshold is not None
             else None
         )
@@ -992,11 +642,6 @@ class TranADMainModel:
             "ConfusionMatrix\n": ConfMatrix,
         }
 
-        print(
-            "\nTranAD Evaluation Results "
-            "──────────────────"
-        )
-
         for MetricName, MetricValue in Results.items():
             print(
                 f"  {MetricName:<20}: "
@@ -1005,25 +650,22 @@ class TranADMainModel:
 
         return Results
 
-    # ──────────────────────────────────────────────────────────────
     def Save(self, FilePath: str) -> None:
-        """Speichert Gewichte, φ und Verlaufsprotokoll / Saves weights, φ and history."""
         torch.save({
-            "NetworkState":      self.Network.state_dict(),  # Alle Netzgewichte / All network weights
-            "FocusScore":        self.FocusScore,            # Aktueller φ-Wert / Current φ value
-            "TrainingHistory":   self.TrainingHistory,       # Verlauf / History
-            "AnomalyThreshold":  self.AnomalyThreshold,     # Gelernter Schwellenwert / Learned threshold
+            "NetworkState":      self.Network.state_dict(),
+            "FocusScore":        self.FocusScore,
+            "TrainingHistory":   self.TrainingHistory,
+            "AnomalyThreshold":  self.AnomalyThreshold,
         }, FilePath)
         print(f"Model saved  {FilePath}")
 
     def Load(self, FilePath: str) -> None:
-        """Lädt Gewichte, φ und Verlaufsprotokoll / Loads weights, φ and history."""
         Checkpoint = torch.load(FilePath, map_location=self.Device, weights_only=False)
-        self.Network.load_state_dict(Checkpoint["NetworkState"])    # Gewichte restaurieren / Restore weights
-        self.FocusScore       = Checkpoint["FocusScore"]            # φ restaurieren / Restore φ
-        self.TrainingHistory  = Checkpoint["TrainingHistory"]       # Verlauf laden / Load history
-        self.AnomalyThreshold = Checkpoint["AnomalyThreshold"]     # Schwellenwert laden / Load threshold
-        self.Network.eval()                                         # Direkt in Eval-Modus / Directly eval mode
+        self.Network.load_state_dict(Checkpoint["NetworkState"])
+        self.FocusScore       = Checkpoint["FocusScore"]
+        self.TrainingHistory  = Checkpoint["TrainingHistory"]
+        self.AnomalyThreshold = Checkpoint["AnomalyThreshold"]
+        self.Network.eval()
         print(f"Model loaded  {FilePath}")
 
 

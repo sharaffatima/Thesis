@@ -2,8 +2,6 @@
 import numpy as np
 from sklearn.metrics import precision_recall_curve
 
-# Threshold calculation method based on Validation scores
-
 
 def ChooseThresholdForRecall(
     Labels: np.ndarray,
@@ -12,7 +10,6 @@ def ChooseThresholdForRecall(
 ) -> dict:
     """
     Selects a threshold on the validation set.
-
     The threshold must achieve at least TargetRecall.
     Among all valid thresholds, the one with the highest
     validation precision is selected.
@@ -25,8 +22,6 @@ def ChooseThresholdForRecall(
         )
     )
 
-    # The final precision and recall values do not have
-    # a corresponding threshold.
     PrecisionValues = PrecisionValues[:-1]
     RecallValues = RecallValues[:-1]
 
@@ -50,9 +45,6 @@ def ChooseThresholdForRecall(
         )
     ]
 
-    # In case of a tie, choose the highest threshold.
-    # This usually reduces false positives while still
-    # satisfying the recall requirement.
     BestIndex = BestCandidates[
         np.argmax(ThresholdValues[BestCandidates])
     ]

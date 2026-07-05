@@ -10,11 +10,7 @@ def aggregate_shap_intervals(
     absolute: bool = True,
 ) -> np.ndarray:
     """
-    Input:
-        shap_values: (time, leads)
-
-    Output:
-        aggregated: (intervals, leads)
+    Aggregate SHAP values into temporal intervals
     """
     if shap_values.ndim != 2:
         raise ValueError(
@@ -44,24 +40,6 @@ def plot_normal_anomalous_shap_heatmaps(
     percentile: float = 99.0,
     save_path: Path | str | None = None,
 ) -> None:
-    """
-    Plot normal and anomalous mean absolute SHAP heatmaps side by side.
-
-    Parameters
-    ----------
-    normal_values:
-        Shape (intervals, leads).
-    anomalous_values:
-        Shape (intervals, leads).
-    lead_names:
-        Names of the ECG leads.
-    interval_seconds:
-        Duration represented by one temporal interval.
-    percentile:
-        Percentile used for the shared upper color limit.
-    save_path:
-        Optional path for saving the complete figure.
-    """
 
     if normal_values.ndim != 2 or anomalous_values.ndim != 2:
         raise ValueError(

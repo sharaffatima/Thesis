@@ -5,24 +5,6 @@ from matplotlib.colors import LinearSegmentedColormap
 # Helper functions for Plotting comparable Attention and SHAP visualisations
 # Those are mainly for the temporal importance plots
 
-def normalize_importance(values):
-    """
-    Normalize the importance values to the range [0, 1].
-    This is helpful because it makes the importance values for attention and SHAP comparabel
-    """
-    values = np.asarray(values, dtype=np.float64)
-
-    value_min = values.min()
-    value_max = values.max()
-
-    if np.isclose(value_min, value_max):
-        return np.zeros_like(values)
-
-    return (values - value_min) / (value_max - value_min)
-
-
-
-
 ECG_LEADS = [
     "I", "II", "III",
     "aVR", "aVL", "aVF",
@@ -38,6 +20,21 @@ BrightImportanceCmap = LinearSegmentedColormap.from_list(
     BaseCmap(np.linspace(0.10, 0.90, 256)),
 )
 
+
+def normalize_importance(values):
+    """
+    Normalize the importance values to the range [0, 1].
+    This is helpful because it makes the importance values for attention and SHAP comparabel
+    """
+    values = np.asarray(values, dtype=np.float64)
+
+    value_min = values.min()
+    value_max = values.max()
+
+    if np.isclose(value_min, value_max):
+        return np.zeros_like(values)
+
+    return (values - value_min) / (value_max - value_min)
 
 
 def plot_temporal_importance(
@@ -65,7 +62,6 @@ def plot_temporal_importance(
         figsize=(14, 8)
     )
 
-    # Temporal attention displayed as vertical stripes
     image = axis.imshow(
         normalized[np.newaxis, :],
         aspect="auto",
@@ -84,11 +80,9 @@ def plot_temporal_importance(
 
     row_positions = np.arange(11, -1, -1)
 
-    # Plot each lead in the same visible color
     for lead_index in range(12):
         signal = ecg[:, lead_index]
 
-        # Center and scale only for stacked visualization
         signal = signal - np.median(signal)
 
         amplitude = np.percentile(

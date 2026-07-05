@@ -2,46 +2,25 @@
 import torch
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
-
 from typing import Optional, List
 from models.tranad import TranADMainModel
 
 
-
-# ============================================================
-# AnoFormer Attention Explainability
-# ============================================================
-
 class AnoFormerExplainability:
     """
-    Attention-based explainability for AnoFormer on ECG data.
-
-    Purpose:
-      1. Compare original and reconstructed ECG signals.
-      2. Visualize temporal self-attention.
-      3. Compare attention importance with reconstruction error.
-
-    Important:
-      Attention explains temporal focus, not lead importance.
-      Reconstruction error is the direct basis of the anomaly score.
+    Attention-based explainability for AnoFormer on ECG data
     """
 
     def __init__(self, AnoFormerModel):
         self.Model = AnoFormerModel
         self.Device = AnoFormerModel.Device
 
-    # ──────────────────────────────────────────────────────────
     def _get_attention_matrix(
         self,
         TimeSeriesWindow: torch.Tensor,
         BlockIndex: int = 0,
         HeadIndex: int | None = None,
     ) -> np.ndarray:
-        """
-        Returns attention matrix of shape (T, T).
-
-        If HeadIndex is None, attention is averaged across all heads.
-        """
 
         self.Model.Generator.eval()
         Input = TimeSeriesWindow.to(self.Device)
@@ -71,30 +50,13 @@ class AnoFormerExplainability:
 
         return AttMatrix
 
-    # ──────────────────────────────────────────────────────────
+     # this is needed because sometimes we need to aggregate the attention matrix into blocks for visualization
     def _aggregate_attention_matrix(
         self,
         AttentionMatrix: np.ndarray,
         BlockSize: int = 10,
         Aggregation: str = "mean_attention_mass",
     ) -> np.ndarray:
-        """
-        Aggregates a timestep-level attention matrix into interval-level blocks.
-
-        Input:
-            AttentionMatrix: shape (T, T)
-
-        Output:
-            AggregatedMatrix: shape (NumBlocks, NumBlocks)
-
-        Recommended:
-            Aggregation = "mean_attention_mass"
-
-        Meaning:
-            Each cell [i, j] shows how much attention, on average,
-            query interval i gives to key interval j.
-        """
-
 
         if AttentionMatrix.ndim != 2:
             raise ValueError("AttentionMatrix must have shape (T, T).")
@@ -148,8 +110,6 @@ class AnoFormerExplainability:
         return AggregatedMatrix
     
 
-
-    # ──────────────────────────────────────────────────────────
     def GetAttentionImportance(
         self,
         TimeSeriesWindow: torch.Tensor,
@@ -158,7 +118,6 @@ class AnoFormerExplainability:
     ) -> np.ndarray:
         """
         Returns mean attention received per timestep.
-        Shape: (T,)
         """
 
         AttMatrix = self._get_attention_matrix(
@@ -171,7 +130,6 @@ class AnoFormerExplainability:
 
         return AttentionImportance
 
-    # ──────────────────────────────────────────────────────────
     def GetIntervalAttentionImportance(
         self,
         TimeSeriesWindow: torch.Tensor,
@@ -180,10 +138,7 @@ class AnoFormerExplainability:
         BlockSize: int = 10,
     ) -> np.ndarray:
         """
-        Returns mean attention received per temporal interval.
-
-        For an ECG with 1000 timesteps and BlockSize=10,
-        the output shape is (100,).
+        Returns mean attention received per temporal interval
         """
 
         AttentionImportance = self.GetAttentionImportance(
@@ -203,19 +158,13 @@ class AnoFormerExplainability:
         ).mean(axis=1)
 
         return IntervalImportance
+    
 
-    # ──────────────────────────────────────────────────────────
     def GetReconstructionErrorOverTime(
         self,
         TimeSeriesWindow: torch.Tensor,
         DatasetForInverseNorm,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """
-        Returns:
-            Original data: (T, F)
-            Reconstructed data: (T, F)
-            Reconstruction error over time: (T,)
-        """
 
         self.Model.Generator.eval()
         Input = TimeSeriesWindow.to(self.Device)
@@ -237,7 +186,8 @@ class AnoFormerExplainability:
 
         return OriginalNP, ReconstructedNP, ReconstructionError
 
-    # ──────────────────────────────────────────────────────────
+
+    # Plots Reconstrucion, Attention heatmaps and reconstruction vs. attention for a normal and anomalous sample
     def CompareNormalAndAnomalousAttention(
         self,
         NormalWindow: torch.Tensor,
@@ -253,15 +203,6 @@ class AnoFormerExplainability:
         Aggregation: str = "mean_attention_mass",
         SamplingRate: int = 100,
     ) -> None:
-        """
-        Compares attention and reconstruction behavior for one normal
-        and one anomalous ECG.
-
-        Rows:
-          1. Original vs reconstructed signal for one ECG lead.
-          2. Attention heatmap.
-          3. Attention importance vs reconstruction error.
-        """
 
         def compute_all(Window):
             OriginalNP, ReconstructedNP, ReconstructionError = (
@@ -298,11 +239,7 @@ class AnoFormerExplainability:
             attention_title = f"Block {BlockIndex}, Head {HeadIndex}"
 
 
-
-        # ============================================================
         # Figure 1: Original vs Reconstruction
-        # ============================================================
-
         fig1, axes1 = plt.subplots(4, 2, figsize=(22, 12), sharex=True)
 
         ECG_LEADS = [
@@ -329,10 +266,6 @@ class AnoFormerExplainability:
             ax_normal = axes1[group_idx, 0]
             ax_anom = axes1[group_idx, 1]
 
-
-            # Compute adaptive vertical spacing for this group
-            # using BOTH normal and anomalous ECGs.
-
             group_values = []
 
             for lead_idx in lead_group:
@@ -350,16 +283,11 @@ class AnoFormerExplainability:
             group_high = np.percentile(group_values, 99)
             group_range = group_high - group_low
 
-            # Minimum spacing so very flat groups still look readable
             LeadOffset = max(group_range * 1.4, 1.5)
-
-
-            # Plot normal and anomalous side by side
 
             for local_idx, lead_idx in enumerate(lead_group):
                 lead_name = ECG_LEADS[lead_idx]
 
-                # Reverse order so first lead appears at the top
                 offset = (len(lead_group) - 1 - local_idx) * LeadOffset
 
                 # Normal ECG
@@ -391,9 +319,6 @@ class AnoFormerExplainability:
                     linewidth=0.8,
                     label="Reconstructed" if group_idx == 0 and local_idx == 0 else None,
                 )
-
-
-            # Same y-ticks and same y-limits for normal and anomalous group
 
             ytick_positions = [
                 (len(lead_group) - 1 - i) * LeadOffset
@@ -434,10 +359,7 @@ class AnoFormerExplainability:
 
 
 
-        # ============================================================
         # Figure 2: Attention vs Reconstruction Error
-        # ============================================================
-
         fig2, axes2 = plt.subplots(1, 2, figsize=(20, 5), sharex=True)
 
         def plot_attention_vs_error(ax, error, attention, title):
@@ -509,10 +431,7 @@ class AnoFormerExplainability:
         plt.tight_layout()
         plt.show()
 
-        # ============================================================
         # Figure 3: Attention Heatmaps
-        # ============================================================
-        
         fig3, axes3 = plt.subplots(1, 2, figsize=(18, 6))
 
         NormalHeatmap = normal_att
@@ -548,7 +467,6 @@ class AnoFormerExplainability:
                 )
             ),
         )
-
 
         im0 = axes3[0].imshow(
             NormalHeatmap,
@@ -618,11 +536,7 @@ class AnoFormerExplainability:
         plt.show()
 
 
-    # ──────────────────────────────────────────────────────────
     def ShowTrainingHistory(self) -> None:
-        """
-        Shows generator and discriminator loss curves.
-        """
 
         History = self.Model.TrainingHistory
 
@@ -656,14 +570,11 @@ class AnoFormerExplainability:
 
 
 
-# ============================================================
-# TranADExplainability Attention-Explainability
-# ============================================================
 
+# TranAD Attention-Explainability
 class TranADExplainability:
     """
-    Erklärt TranAD-Anomalieentscheidungen mit sechs Visualisierungsmethoden.
-    / Explains TranAD anomaly decisions with six visualization methods.
+    Attention-based explainability for TranAD on ECG data
     """
 
     def __init__(self, MainModel: TranADMainModel):
@@ -678,11 +589,6 @@ class TranADExplainability:
         LayerIndex: int = 0,
         HeadIndex: int | None = None,
     ) -> np.ndarray:
-        """
-        Returns attention matrix of shape (T, T).
-
-        If HeadIndex is None, attention is averaged across all heads.
-        """
 
         self.Model.Network.eval()
         InputTensor = TimeSeriesWindow.to(self.Device)
@@ -729,28 +635,13 @@ class TranADExplainability:
 
         return AttMatrix
 
+    # Aggregates the attention matrix into blocks for visualization
     def _aggregate_attention_matrix(
         self,
         AttentionMatrix: np.ndarray,
         BlockSize: int = 10,
         Aggregation: str = "mean_attention_mass",
     ) -> np.ndarray:
-        """
-        Aggregates a timestep-level attention matrix into interval-level blocks.
-
-        Input:
-            AttentionMatrix: shape (T, T)
-
-        Output:
-            AggregatedMatrix: shape (NumBlocks, NumBlocks)
-
-        Recommended:
-            Aggregation = "mean_attention_mass"
-
-        Meaning:
-            Each cell [i, j] shows how much attention, on average,
-            query interval i gives to key interval j.
-        """
 
         if AttentionMatrix.ndim != 2:
             raise ValueError("AttentionMatrix must have shape (T, T).")
@@ -777,8 +668,6 @@ class TranADExplainability:
                 ]
 
                 if Aggregation == "mean_attention_mass":
-                    # For each query timestep, sum attention going to this key interval.
-                    # Then average across query timesteps.
                     AggregatedMatrix[QueryBlockIndex, KeyBlockIndex] = Block.sum(axis=1).mean()
 
                 elif Aggregation == "mean_value":
@@ -793,8 +682,8 @@ class TranADExplainability:
                     )
 
         return AggregatedMatrix 
-    
-    # ──────────────────────────────────────────────────────────
+
+
     def GetAttentionImportance(
         self,
         TimeSeriesWindow: torch.Tensor,
@@ -803,8 +692,7 @@ class TranADExplainability:
         HeadIndex: int | None = None,
     ) -> np.ndarray:
         """
-        Returns mean attention received per timestep.
-        Shape: (T,)
+        Returns mean attention received per timestep
         """
 
         AttentionMatrix = self._get_attention_matrix(
@@ -818,7 +706,7 @@ class TranADExplainability:
 
         return AttentionImportance
 
-    # ──────────────────────────────────────────────────────────
+
     def GetIntervalAttentionImportance(
         self,
         TimeSeriesWindow: torch.Tensor,
@@ -828,20 +716,12 @@ class TranADExplainability:
         BlockSize: int = 10,
     ) -> np.ndarray:
         """
-        Returns mean attention received per temporal interval.
-
-        The attention matrix is first reduced from (T, T) to (T,)
-        by averaging over all query positions. The timestep-level
-        values are then averaged within temporal intervals.
-
-        For an ECG with 1000 timesteps and BlockSize=10,
-        the returned shape is (100,).
+        Returns mean attention received per temporal interval
         """
 
         if BlockSize <= 0:
             raise ValueError("BlockSize must be greater than zero.")
 
-        # Shape: (T, T)
         AttentionMatrix = self._get_attention_matrix(
             TimeSeriesWindow=TimeSeriesWindow,
             Component=Component,
@@ -849,8 +729,6 @@ class TranADExplainability:
             HeadIndex=HeadIndex,
         )
 
-        # Average across query positions.
-        # Result: attention received by each key timestep, shape (T,)
         AttentionImportance = AttentionMatrix.mean(axis=0)
 
         NumIntervals = len(AttentionImportance) // BlockSize
@@ -866,7 +744,6 @@ class TranADExplainability:
             :TrimmedLength
         ]
 
-        # Shape: (NumIntervals, BlockSize) -> (NumIntervals,)
         IntervalImportance = TrimmedImportance.reshape(
             NumIntervals,
             BlockSize,
@@ -874,18 +751,12 @@ class TranADExplainability:
 
         return IntervalImportance
 
-    # ──────────────────────────────────────────────────────────
+
     def GetTranADReconstructionErrorOverTime(
         self,
         TimeSeriesWindow: torch.Tensor,
         DatasetForInverseNorm,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """
-        Returns:
-            Original data: (T, F)
-            Phase-2 reconstructed data: (T, F)
-            Reconstruction error over time: (T,)
-        """
 
         self.Model.Network.eval()
         InputTensor = TimeSeriesWindow.to(self.Device)
@@ -905,7 +776,7 @@ class TranADExplainability:
 
         return OriginalNP, ReconstructedNP, ReconstructionError
     
-    # ──────────────────────────────────────────────────────────    
+
     def CompareNormalAndAnomalousAttention(
         self,
         NormalWindow: torch.Tensor,
@@ -972,10 +843,8 @@ class TranADExplainability:
         else:
             attention_title = f"{Component}, Layer {LayerIndex}, Head {HeadIndex}"
 
-        # ============================================================
-        # Figure 1: Original vs Reconstruction
-        # ============================================================
 
+        # Figure 1: Original vs Reconstruction
         fig1, axes1 = plt.subplots(4, 2, figsize=(22, 12), sharex=True)
 
         ECG_LEADS = [
@@ -1091,11 +960,7 @@ class TranADExplainability:
         plt.show()
 
 
-
-        # ============================================================
         # Figure 2: Attention vs Reconstruction Error
-        # ============================================================
-
         fig2, axes2 = plt.subplots(1, 2, figsize=(20, 5), sharex=True)
 
         def plot_attention_vs_error(ax, error, attention, title):
@@ -1163,10 +1028,7 @@ class TranADExplainability:
         plt.show()
 
 
-        # ============================================================
         # Figure 3: Attention Heatmaps
-        # ============================================================
-
         fig3, axes3 = plt.subplots(1, 2, figsize=(18, 6))
 
         NormalHeatmap = normal_att
@@ -1277,23 +1139,17 @@ class TranADExplainability:
         plt.show()
 
 
-    # ──────────────────────────────────────────────────────────
-
     def ShowTrainingHistory(self) -> None:
-            """
-            Visualisiert Verlauf von Gesamtverlust und φ über alle Epochen.
-            / Visualizes history of total loss and φ over all epochs.
-            """
+            
             History = self.Model.TrainingHistory
-            if not History["TotalLoss"]:                       # Noch kein Training / No training yet
+            if not History["TotalLoss"]:
                 print("No training history available.")
                 return
 
-            Epochs = range(1, len(History["TotalLoss"]) + 1)  # Epochen-Achse / Epoch axis
+            Epochs = range(1, len(History["TotalLoss"]) + 1)
 
             fig, Axes = plt.subplots(1, 2, figsize=(13, 4))
 
-            # Links: Loss / Left: Loss
             Axes[0].plot(Epochs, History["TotalLoss"], linewidth=1.5, color="steelblue", label="TranAD Loss")
             Axes[0].set_title(" Training Loss")
             Axes[0].set_xlabel("Epoch")
@@ -1301,7 +1157,6 @@ class TranADExplainability:
             Axes[0].legend()
             Axes[0].grid(alpha=0.3)
 
-            # Rechts: φ / Right: φ
             Axes[1].plot(Epochs, History["FocusScore"], linewidth=1.5, color="darkorange", label="φ (Focus Score)")
             Axes[1].set_title("Focus Score φ per Epoch")
             Axes[1].set_xlabel(" Epoch")
@@ -1313,32 +1168,28 @@ class TranADExplainability:
             plt.tight_layout()
             plt.show()
 
-        # ──────────────────────────────────────────────────────────────
+
     def ShowFocusScoreEffect(
         self,
-        TimeSeriesWindow: torch.Tensor,        # (1, T, F)
-        FocusScoreList:   Optional[List[float]] = None,  # Zu vergleichende φ-Werte / φ values to compare
+        TimeSeriesWindow: torch.Tensor,
+        FocusScoreList:   Optional[List[float]] = None, 
     ) -> None:
         """
-        Zeigt wie verschiedene φ-Werte den kombinierten Loss gewichten.
-        / Shows how different φ values weight the combined loss.
-        L(φ) = (1/φ)·E1 + φ·E2 – für jedes φ eine Kurve / one curve per φ.
+        Shows how different φ values weight the combined loss
         """
         if FocusScoreList is None:
-            FocusScoreList = [0.5, 1.0, 2.0, 5.0, 10.0, 30.0]  # Standard-Vergleichswerte / Default values
+            FocusScoreList = [0.5, 1.0, 2.0, 5.0, 10.0, 30.0]
 
         self.Model.Network.eval()
         with torch.no_grad():
             InputTensor = TimeSeriesWindow.to(self.Device)
             Rec1, Rec2  = self.Model.Network(InputTensor)
-            Error1 = ((Rec1 - InputTensor) ** 2).mean(dim=-1)[0].cpu().numpy()  # (T,) Phase-1-Fehler / Phase-1 error
-            Error2 = ((Rec2 - InputTensor) ** 2).mean(dim=-1)[0].cpu().numpy()  # (T,) Phase-2-Fehler / Phase-2 error
+            Error1 = ((Rec1 - InputTensor) ** 2).mean(dim=-1)[0].cpu().numpy()
+            Error2 = ((Rec2 - InputTensor) ** 2).mean(dim=-1)[0].cpu().numpy()
 
-        TimeAxis = np.arange(len(Error1))  # Zeitachse / Time axis
-
+        TimeAxis = np.arange(len(Error1))
         fig, Axes = plt.subplots(1, 2, figsize=(14, 5))
 
-        # Links: Rohfehler beider Phasen / Left: raw errors of both phases
         Axes[0].plot(TimeAxis, Error1, color="royalblue", linewidth=1.5, label=" Phase-1 error")
         Axes[0].plot(TimeAxis, Error2, color="crimson",   linewidth=1.5, label="P Phase-2 error")
         Axes[0].set_title(" Raw Errors Phase 1 vs. Phase 2")
@@ -1346,7 +1197,6 @@ class TranADExplainability:
         Axes[0].legend()
         Axes[0].grid(alpha=0.3)
 
-        # Rechts: kombinierter Loss für jedes φ / Right: combined loss for each φ
         for Phi in FocusScoreList:
             CombinedLoss = Error1 / max(Phi, 1e-6) + Error2 * Phi  # L(φ) = E1/φ + φ·E2
             Axes[1].plot(TimeAxis, CombinedLoss, linewidth=1.2, label=f"φ={Phi:.1f}")

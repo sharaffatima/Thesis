@@ -6,12 +6,6 @@ class SensitivityEvaluation:
     """
     Sensitivity evaluation for explanation methods.
     Uses timestep-level temporal importance values.
-
-    Steps:
-    1. Select the top 10% most important timesteps.
-    2. Mask these timesteps across all 12 ECG leads using linear interpolation.
-    3. Recalculate the anomaly score.
-    4. Compute the absolute relative anomaly-score change.
     """
 
     def __init__(self, top_fraction=0.10, epsilon=1e-8):
