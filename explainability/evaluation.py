@@ -1,10 +1,12 @@
 import numpy as np
 import torch
+from scipy.stats import spearmanr
+from sklearn.metrics.pairwise import cosine_similarity
 
 
-class SensitivityEvaluation:
+class FaithfulnessEvaluation:
     """
-    Sensitivity evaluation for explanation methods.
+    Faithfulness evaluation for explanation methods.
     Uses timestep-level temporal importance values.
     """
 
@@ -94,7 +96,7 @@ class SensitivityEvaluation:
 
     def evaluate(self, ecg, temporal_importance, score_function):
         """
-        Evaluates sensitivity for one ECG and one explanation method.
+        Evaluates Faithfulness for one ECG and one explanation method.
         """
 
         # Original anomaly score
@@ -109,10 +111,10 @@ class SensitivityEvaluation:
         # Perturbed anomaly score
         perturbed_score = score_function(perturbed_ecg)
 
-        # Sensitivity score
+        # Faithfulness score
         score_difference = perturbed_score - original_score
 
-        sensitivity_score = (
+        faithfulness_score = (
             abs(score_difference) / (
             abs(original_score) + self.epsilon)
         )
@@ -121,7 +123,7 @@ class SensitivityEvaluation:
             "original_score": original_score,
             "perturbed_score": perturbed_score,
             "score_difference": score_difference,
-            "sensitivity_score": sensitivity_score,
+            "faithfulness_score": faithfulness_score,
             "selected_timesteps": selected_timesteps,
             "masked_ranges": masked_ranges,
             "perturbed_ecg": perturbed_ecg,
@@ -153,7 +155,7 @@ class StabilityEvaluation:
 
         # Standard deviation per lead: shape (1, 1, 12)
         lead_std = ecg.std(dim=1, keepdim=True, unbiased=False)
-
+        
         noise = torch.randn_like(ecg) * self.noise_ratio * lead_std
         noisy_ecg = ecg + noise
 
@@ -164,26 +166,19 @@ class StabilityEvaluation:
         Calculate mean cosine similarity between the original explanation
         and the explanations of noisy ECG variants
         """
-        original_importance = np.asarray(original_importance, dtype=float).reshape(-1)
+        original_importance = np.asarray(original_importance, dtype=float).reshape(1, -1)
 
         cosine_similarities = []
 
         for noisy_importance in noisy_importance_values:
-            noisy_importance = np.asarray(noisy_importance, dtype=float).reshape(-1)
-
-            numerator = np.dot(original_importance, noisy_importance)
-
-            denominator = (
-                np.linalg.norm(original_importance)
-                * np.linalg.norm(noisy_importance)
-                + self.epsilon
-            )
-
-            cosine_similarity = numerator / denominator
-            cosine_similarities.append(cosine_similarity)
+            noisy_importance = np.asarray(noisy_importance, dtype=float).reshape(1, -1)
+            similarity = cosine_similarity(
+                original_importance,
+                noisy_importance
+            )[0, 0]
+            cosine_similarities.append(similarity)
 
         cosine_similarities = np.asarray(cosine_similarities, dtype=float)
-
         stability_score = float(cosine_similarities.mean())
 
         if len(cosine_similarities) > 1:
@@ -198,6 +193,38 @@ class StabilityEvaluation:
         }
 
 
+class ReconstructionErrorAgreementEvaluation:
+    """
+    Reconstruction-error agreement evaluation.
+    Compares timestep-level explanation importance with timestep-level reconstruction error using spearman rank correlation.
+    """
 
-class PlausibilityEvaluation:
-    pass
+    def evaluate(self, temporal_importance, reconstruction_error):
+        """
+        Takes temporal importance vector shape (1000,) and reconstruction error vector shape (1000,)
+        and returns a dictionary containing the Spearman correlation
+        """
+
+        temporal_importance = np.asarray(
+            temporal_importance,
+            dtype=float,
+        ).reshape(-1)
+
+        reconstruction_error = np.asarray(
+            reconstruction_error,
+            dtype=float,
+        ).reshape(-1)
+
+        if temporal_importance.shape != reconstruction_error.shape:
+            raise ValueError(
+                f"temporal_importance and reconstruction_error must have "
+                f"the same shape, but got {temporal_importance.shape} and "
+                f"{reconstruction_error.shape}." 
+            )
+        
+        correlation, _ = spearmanr(
+            temporal_importance,
+            reconstruction_error
+        )
+        return{"spearman_correlation": float(correlation) }
+
