@@ -13,7 +13,7 @@ bachelor-thesis/
 ├── explainability/
 │   ├── attention.py
 │   ├── shap_utils.py
-│   ├── anomaly_score_wrappers.py
+│   ├── shap_wrappers.py
 │   └── evaluation.py
 │
 ├── models/

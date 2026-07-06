@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path
-from explainability.visualization import BrightCmap
+from attention_utils import BrightCmap, ECG_LEADS
 
 
 def aggregate_shap_intervals(
@@ -13,9 +13,7 @@ def aggregate_shap_intervals(
     Aggregate SHAP values into temporal intervals
     """
     if shap_values.ndim != 2:
-        raise ValueError(
-            f"Expected (time, leads), got {shap_values.shape}"
-        )
+        raise ValueError(f"Expected (time, leads), got {shap_values.shape}")
 
     values = np.abs(shap_values) if absolute else shap_values
 
@@ -24,18 +22,12 @@ def aggregate_shap_intervals(
 
     values = values[:num_blocks * block_size]
 
-    return values.reshape(
-        num_blocks,
-        block_size,
-        num_leads,
-    ).mean(axis=1)
-
+    return values.reshape(num_blocks, block_size, num_leads).mean(axis=1)
 
 
 def plot_normal_anomalous_shap_heatmaps(
     normal_values: np.ndarray,
     anomalous_values: np.ndarray,
-    lead_names: list[str],
     interval_seconds: float = 0.1,
     percentile: float = 99.0,
     save_path: Path | str | None = None,
@@ -51,7 +43,7 @@ def plot_normal_anomalous_shap_heatmaps(
             "Normal and anomalous explanations must have the same shape."
         )
 
-    if normal_values.shape[1] != len(lead_names):
+    if normal_values.shape[1] != len(ECG_LEADS):
         raise ValueError(
             "The number of leads does not match lead_names."
         )
@@ -71,9 +63,6 @@ def plot_normal_anomalous_shap_heatmaps(
         percentile,
     )
 
-    if shared_vmax <= 0:
-        shared_vmax = 1e-12
-
     duration_seconds = (
         normal_values.shape[0] * interval_seconds
     )
@@ -90,11 +79,7 @@ def plot_normal_anomalous_shap_heatmaps(
     heatmaps = [normal_heatmap, anomalous_heatmap]
     image = None
 
-    for axis, heatmap, title in zip(
-        axes,
-        heatmaps,
-        titles,
-    ):
+    for axis, heatmap, title in zip(axes, heatmaps, titles):
         image = axis.imshow(
             heatmap,
             aspect="auto",
@@ -105,20 +90,20 @@ def plot_normal_anomalous_shap_heatmaps(
             extent=[
                 0,
                 duration_seconds,
-                len(lead_names) - 0.5,
+                len(ECG_LEADS) - 0.5,
                 -0.5,
             ],
         )
 
         axis.set_title(title)
         axis.set_xlabel("Time (seconds)")
-        axis.set_yticks(np.arange(len(lead_names)))
-        axis.set_yticklabels(lead_names)
+        axis.set_yticks(np.arange(len(ECG_LEADS)))
+        axis.set_yticklabels(ECG_LEADS)
 
     axes[0].set_ylabel("ECG lead")
 
     figure.suptitle(
-        "AnoFormer mean absolute SHAP importance",
+        "Mean absolute SHAP importance",
         fontsize=14,
     )
 

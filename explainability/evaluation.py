@@ -97,23 +97,8 @@ class SensitivityEvaluation:
         Evaluates sensitivity for one ECG and one explanation method.
         """
 
-        # Convert ECG to tensor if needed
-        if isinstance(ecg, np.ndarray):
-            ecg = torch.tensor(ecg, dtype=torch.float32)
-
-        if ecg.ndim == 2:
-            ecg = ecg.unsqueeze(0)
-
         # Original anomaly score
-        with torch.no_grad():
-            original_score = score_function(ecg)
-
-        if isinstance(original_score, torch.Tensor):
-            original_score = float(original_score.detach().cpu().reshape(-1)[0])
-        elif isinstance(original_score, np.ndarray):
-            original_score = float(original_score.reshape(-1)[0])
-        else:
-            original_score = float(original_score)
+        original_score = score_function(ecg)
 
         # Mask top timesteps
         perturbed_ecg, selected_timesteps, masked_ranges = self.mask_top_timesteps(
@@ -122,22 +107,14 @@ class SensitivityEvaluation:
         )
 
         # Perturbed anomaly score
-        with torch.no_grad():
-            perturbed_score = score_function(perturbed_ecg)
-
-        if isinstance(perturbed_score, torch.Tensor):
-            perturbed_score = float(perturbed_score.detach().cpu().reshape(-1)[0])
-        elif isinstance(perturbed_score, np.ndarray):
-            perturbed_score = float(perturbed_score.reshape(-1)[0])
-        else:
-            perturbed_score = float(perturbed_score)
+        perturbed_score = score_function(perturbed_ecg)
 
         # Sensitivity score
         score_difference = perturbed_score - original_score
 
         sensitivity_score = (
-            abs(score_difference)
-            / (abs(original_score) + self.epsilon)
+            abs(score_difference) / (
+            abs(original_score) + self.epsilon)
         )
 
         return {

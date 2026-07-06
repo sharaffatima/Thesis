@@ -85,15 +85,8 @@ def plot_temporal_importance(
             linewidth=0.9,
         )
 
-    axis.set_xlim(
-        0,
-        duration_seconds,
-    )
-
-    axis.set_ylim(
-        -0.5,
-        11.5,
-    )
+    axis.set_xlim(0, duration_seconds)
+    axis.set_ylim( -0.5, 11.5)
 
     axis.set_yticks(row_positions)
     axis.set_yticklabels(ECG_LEADS)
@@ -102,12 +95,7 @@ def plot_temporal_importance(
     axis.set_xlabel("Time (seconds)")
     axis.set_ylabel("ECG leads")
 
-    colorbar = figure.colorbar(
-        image,
-        ax=axis,
-        pad=0.02,
-    )
-
+    colorbar = figure.colorbar( image, ax=axis, pad=0.02)
     colorbar.set_label("Normalized temporal importance")
 
     figure.tight_layout()

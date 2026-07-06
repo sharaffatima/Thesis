@@ -39,7 +39,6 @@ class AnoFormerExplainability:
         if AttWeights is None:
             raise ValueError("No attention weights available.")
 
-        # AttWeights shape: (1, heads, T, T)
         if HeadIndex is None:
             AttMatrix = AttWeights[0].mean(dim=0).detach().cpu().numpy()
         else:
@@ -52,7 +51,6 @@ class AnoFormerExplainability:
         self,
         AttentionMatrix: np.ndarray,
         BlockSize: int = 10,
-        Aggregation: str = "mean_attention_mass",
     ) -> np.ndarray:
 
         if AttentionMatrix.ndim != 2:
@@ -84,26 +82,13 @@ class AnoFormerExplainability:
                     KeyBlockIndex * BlockSize:(KeyBlockIndex + 1) * BlockSize,
                 ]
 
-                if Aggregation == "mean_attention_mass":
-                    # For each query timestep, sum attention going to this key interval.
-                    # Then average across query timesteps.
-                    AggregatedMatrix[QueryBlockIndex, KeyBlockIndex] = Block.sum(axis=1).mean()
-
-                elif Aggregation == "mean_value":
-                    AggregatedMatrix[QueryBlockIndex, KeyBlockIndex] = Block.mean()
-
-                elif Aggregation == "sum":
-                    AggregatedMatrix[QueryBlockIndex, KeyBlockIndex] = Block.sum()
-
-                else:
-                    raise ValueError(
-                        "Aggregation must be 'mean_attention_mass', 'mean_value', or 'sum'."
-                    )
-
+                # For each query timestep, sum attention going to this key interval.
+                # Then average across query timesteps.
+                AggregatedMatrix[QueryBlockIndex, KeyBlockIndex] = Block.sum(axis=1).mean()
         return AggregatedMatrix
     
 
-    def GetAttentionImportance(
+    def get_attention_importance(
         self,
         TimeSeriesWindow: torch.Tensor,
         BlockIndex: int = 0,
@@ -121,7 +106,7 @@ class AnoFormerExplainability:
         AttentionImportance = AttMatrix.mean(axis=0)
         return AttentionImportance
 
-    def GetIntervalAttentionImportance(
+    def get_interval_attention_importance(
         self,
         TimeSeriesWindow: torch.Tensor,
         BlockIndex: int = 0,
@@ -150,7 +135,7 @@ class AnoFormerExplainability:
         return IntervalImportance
     
 
-    def GetReconstructionErrorOverTime(
+    def get_reconstruction_error_over_time(
         self,
         TimeSeriesWindow: torch.Tensor,
         DatasetForInverseNorm,
@@ -163,11 +148,11 @@ class AnoFormerExplainability:
             Masked, _ = self.Model.Masking(Input, None)
             Reconstructed = self.Model.Generator(Masked)
 
-        OriginalNP = DatasetForInverseNorm.InverseNormalization(
+        OriginalNP = DatasetForInverseNorm.inverse_normalization(
             Input[0].detach().cpu().numpy()
         )
 
-        ReconstructedNP = DatasetForInverseNorm.InverseNormalization(
+        ReconstructedNP = DatasetForInverseNorm.inverse_normalization(
             Reconstructed[0].detach().cpu().numpy()
         )
 
@@ -178,7 +163,7 @@ class AnoFormerExplainability:
 
 
     # Plots Reconstrucion, Attention heatmaps and reconstruction vs. attention for a normal and anomalous sample
-    def CompareNormalAndAnomalousAttention(
+    def compare_normal_and_anomalous_attention(
         self,
         NormalWindow: torch.Tensor,
         AnomalousWindow: torch.Tensor,
@@ -190,7 +175,6 @@ class AnoFormerExplainability:
         Percentile: float = 99.0,
         UseIntervalHeatmap: bool = True,
         BlockSize: int = 10,
-        Aggregation: str = "mean_attention_mass",
         SamplingRate: int = 100,
     ) -> None:
 
@@ -280,13 +264,11 @@ class AnoFormerExplainability:
             NormalHeatmap = self._aggregate_attention_matrix(
                 AttentionMatrix=normal_att,
                 BlockSize=BlockSize,
-                Aggregation=Aggregation,
             )
 
             AnomalousHeatmap = self._aggregate_attention_matrix(
                 AttentionMatrix=anom_att,
                 BlockSize=BlockSize,
-                Aggregation=Aggregation,
             )
 
         shared_vmax = max(
@@ -335,7 +317,7 @@ class AnoFormerExplainability:
 
             x_label = f"Key interval ({BlockSize / SamplingRate:.2f}s blocks)"
             y_label = f"Query interval ({BlockSize / SamplingRate:.2f}s blocks)"
-            heatmap_type = f"Interval-level attention heatmap ({Aggregation}, {BlockSize} samples)"
+            heatmap_type = f"Interval-level attention heatmap ({BlockSize} samples)"
         else:
             x_label = "Key timestep"
             y_label = "Query timestep"
@@ -362,7 +344,7 @@ class AnoFormerExplainability:
         plt.show()
 
 
-    def ShowTrainingHistory(self) -> None:
+    def show_training_history(self) -> None:
 
         History = self.Model.TrainingHistory
 

@@ -48,7 +48,7 @@ class PTBXLDataset(Dataset):
         y = torch.tensor(self.y[idx], dtype=torch.long)
         return x, y
 
-    def InverseNormalization(self, X):
+    def inverse_normalization(self, X):
         if not self.normalize:
             return X
         return (X * self.std.squeeze() + self.mean.squeeze())
