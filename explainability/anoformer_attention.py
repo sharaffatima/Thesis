@@ -234,6 +234,7 @@ class AnoFormerExplainability:
             normal_error,
             normal_att_imp,
             f"Normal ECG | Sample {NormalIndex}",
+            time_axis=time_axis
         )
 
         plot_attention_vs_error(
@@ -241,6 +242,7 @@ class AnoFormerExplainability:
             anom_error,
             anom_att_imp,
             f"Anomalous ECG | Sample {AnomalousIndex}",
+            time_axis=time_axis
         )
 
         fig2.suptitle(
