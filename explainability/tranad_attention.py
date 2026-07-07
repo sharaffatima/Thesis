@@ -210,7 +210,7 @@ class TranADExplainability:
 
         def compute_all(Window):
             OriginalNP, ReconstructedNP, ReconstructionError = (
-                self.GetTranADReconstructionErrorOverTime(
+                self.get_reconstruction_error_over_time(
                     TimeSeriesWindow=Window,
                     DatasetForInverseNorm=DatasetForInverseNorm,
                 )

@@ -116,7 +116,7 @@ class AnoFormerExplainability:
         """
         Returns mean attention received per temporal interval
         """
-        AttentionImportance = self.GetAttentionImportance(
+        AttentionImportance = self.get_attention_importance(
             TimeSeriesWindow=TimeSeriesWindow,
             BlockIndex=BlockIndex,
             HeadIndex=HeadIndex,
@@ -180,7 +180,7 @@ class AnoFormerExplainability:
 
         def compute_all(Window):
             OriginalNP, ReconstructedNP, ReconstructionError = (
-                self.GetReconstructionErrorOverTime(
+                self.get_reconstruction_error_over_time(
                     TimeSeriesWindow=Window,
                     DatasetForInverseNorm=DatasetForInverseNorm,
                 )
