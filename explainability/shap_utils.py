@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path
-from attention_utils import BrightCmap, ECG_LEADS
+from .attention_utils import BrightCmap, ECG_LEADS
 
 
 def aggregate_shap_intervals(

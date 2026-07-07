@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from attention_utils import BrightCmap, ECG_LEADS
+from .attention_utils import BrightCmap, ECG_LEADS
 
 # Helper functions for Plotting comparable Attention and SHAP visualisations
 # Those are mainly for the temporal importance plots
