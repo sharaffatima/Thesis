@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
-from attention_utils import plot_original_vs_reconstruction, plot_attention_vs_error, BrightCmap
+from .attention_utils import plot_original_vs_reconstruction, plot_attention_vs_error, BrightCmap
 
 class TranADExplainability:
     """
