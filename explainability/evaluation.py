@@ -128,6 +128,45 @@ class FaithfulnessEvaluation:
             "masked_ranges": masked_ranges,
             "perturbed_ecg": perturbed_ecg,
         }
+    
+    def evaluate_samples(
+        self,
+        samples,
+        temporal_importance_values,
+        score_function,
+        model_name,
+        explanation_name,
+    ):
+        """
+        Calculates Evaluations for a set of samples
+        """
+        results = []
+
+        if len(samples) != len(temporal_importance_values):
+            raise ValueError(
+                "Number of samples and temporal importance values must match."
+            )
+
+        for sample, temporal_importance in zip(samples, temporal_importance_values):
+            result = self.evaluate(
+                ecg=sample["ecg"],
+                temporal_importance=temporal_importance,
+                score_function=score_function,
+            )
+
+            results.append({
+                "Model": model_name,
+                "Explanation": explanation_name,
+                "Index": sample["index"],
+                "Case Type": sample["case_type"],
+                "Label": sample["label"],
+                "Original Score": result["original_score"],
+                "Perturbed Score": result["perturbed_score"],
+                "Score Difference": result["score_difference"],
+                "Faithfulness Score": result["faithfulness_score"],
+            })
+
+        return results
 
 
 class StabilityEvaluation:
@@ -191,6 +230,41 @@ class StabilityEvaluation:
             "stability_std": stability_std,
             "cosine_similarities": cosine_similarities,
         }
+    
+    def evaluate_samples(
+        self,
+        samples,
+        original_importance_values,
+        noisy_importance_values,
+        model_name,
+        explanation_name,
+    ):
+        """ Calculates Evaluations for a set of samples """
+        results = []
+
+        for sample, original_importance, noisy_importances in zip(
+            samples,
+            original_importance_values,
+            noisy_importance_values,
+        ):
+            result = self.evaluate(
+                original_importance=original_importance,
+                noisy_importance_values=noisy_importances,
+            )
+
+            results.append({
+                "Model": model_name,
+                "Explanation": explanation_name,
+                "Index": sample["index"],
+                "Case Type": sample["case_type"],
+                "Label": sample["label"],
+                "Stability Score": result["stability_score"],
+                "Stability Std": result["stability_std"],
+                "Number of Noisy Variants": len(noisy_importances),
+            })
+
+        return results
+    
 
 
 class ReconstructionErrorAgreementEvaluation:
@@ -227,4 +301,48 @@ class ReconstructionErrorAgreementEvaluation:
             reconstruction_error
         )
         return{"spearman_correlation": float(correlation) }
+    
+
+    def evaluate_samples(
+        self,
+        samples,
+        temporal_importance_values,
+        reconstruction_error_values,
+        model_name,
+        explanation_name,
+    ):
+        """ Calculates Evaluations for a set of samples """
+
+        if len(samples) != len(temporal_importance_values):
+            raise ValueError(
+                "Number of samples and temporal importance values must match."
+            )
+
+        if len(samples) != len(reconstruction_error_values):
+            raise ValueError(
+                "Number of samples and reconstruction error values must match."
+            )
+
+        results = []
+
+        for sample, temporal_importance, reconstruction_error in zip(
+            samples,
+            temporal_importance_values,
+            reconstruction_error_values,
+        ):
+            result = self.evaluate(
+                temporal_importance=temporal_importance,
+                reconstruction_error=reconstruction_error,
+            )
+
+            results.append({
+                "Model": model_name,
+                "Explanation": explanation_name,
+                "Index": sample["index"],
+                "Case Type": sample["case_type"],
+                "Label": sample["label"],
+                "Spearman Correlation": result["spearman_correlation"],
+            })
+
+        return results
 
