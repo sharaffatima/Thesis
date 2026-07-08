@@ -32,99 +32,111 @@ def plot_original_vs_reconstruction(
     time_axis,
     save_path=None,
 ):
-    layout = [
-        ["I", "aVR", "V1", "V4"],
-        ["II", "aVL", "V2", "V5"],
-        ["III", "aVF", "V3", "V6"],
-    ]
-
     OriginalColor = "#1f4e79"       # dark blue
     ReconstructedColor = "#d95f02"  # orange
 
-    fig, axes = plt.subplots(
-        3,
-        4,
-        figsize=(16, 7),
-        sharex=True,
+    num_leads = len(ECG_LEADS)
+
+    LeadSpacing = 1.0
+    SignalHeight = 0.35
+
+    fig, ax = plt.subplots(
+        figsize=(16, 10)
     )
 
-    for row_idx in range(3):
-        for col_idx in range(4):
-            lead_name = layout[row_idx][col_idx]
-            lead_idx = ECG_LEADS.index(lead_name)
+    for lead_idx, lead_name in enumerate(ECG_LEADS):
+        offset = (num_leads - 1 - lead_idx) * LeadSpacing
 
-            ax = axes[row_idx, col_idx]
+        values = np.concatenate([
+            original[:, lead_idx],
+            reconstructed[:, lead_idx],
+        ])
 
-            ax.plot(
-                time_axis,
-                original[:, lead_idx],
-                color=OriginalColor,
-                linewidth=1.1,
-                label="Original" if row_idx == 0 and col_idx == 0 else None,
-            )
+        scale = np.percentile(
+            np.abs(values),
+            99,
+        )
 
-            ax.plot(
-                time_axis,
-                reconstructed[:, lead_idx],
-                color=ReconstructedColor,
-                linestyle="--",
-                linewidth=1.1,
-                label="Reconstructed" if row_idx == 0 and col_idx == 0 else None,
-            )
+        if scale == 0:
+            scale = 1.0
 
-            values = np.concatenate([
-                original[:, lead_idx],
-                reconstructed[:, lead_idx],
-            ])
+        original_scaled = (
+            original[:, lead_idx] / scale
+        ) * SignalHeight
 
-            y_min = values.min()
-            y_max = values.max()
-            margin = (y_max - y_min) * 0.20
+        reconstructed_scaled = (
+            reconstructed[:, lead_idx] / scale
+        ) * SignalHeight
 
-            if margin == 0:
-                margin = 0.1
+        ax.plot(
+            time_axis,
+            original_scaled + offset,
+            color=OriginalColor,
+            linewidth=1.2,
+            label="Original" if lead_idx == 0 else None,
+        )
 
-            ax.set_ylim(
-                y_min - margin,
-                y_max + margin,
-            )
+        ax.plot(
+            time_axis,
+            reconstructed_scaled + offset,
+            color=ReconstructedColor,
+            linestyle="--",
+            linewidth=1.2,
+            label="Reconstructed" if lead_idx == 0 else None,
+        )
 
-            ax.text(
-                0.02,
-                0.85,
-                lead_name,
-                transform=ax.transAxes,
-                fontsize=12,
-                fontweight="bold",
-            )
+        # horizontal separator line
+        ax.axhline(
+            offset - 0.5 * LeadSpacing,
+            color="gray",
+            linewidth=0.6,
+            alpha=0.3,
+        )
 
-            ax.grid(
-                True,
-                alpha=0.25,
-            )
+    ytick_positions = [
+        (num_leads - 1 - i) * LeadSpacing
+        for i in range(num_leads)
+    ]
 
-            ax.tick_params(
-                axis="both",
-                labelsize=8,
-            )
-
-            ax.set_yticklabels([])
-
-    axes[0, 0].legend(
-        fontsize=9,
-        loc="upper right",
-    )
-
-    for ax in axes[-1, :]:
-        ax.set_xlabel("Timestep")
-
-    fig.suptitle(
-        f"{model_name} {sample_type} ECG | Original vs Reconstructed | Sample {sample_index}",
-        fontsize=16,
+    ax.set_yticks(ytick_positions)
+    ax.set_yticklabels(
+        ECG_LEADS,
+        fontsize=12,
         fontweight="bold",
     )
 
-    plt.tight_layout(rect=[0, 0, 1, 0.94])
+    ax.set_ylim(
+        -0.7,
+        num_leads - 0.3,
+    )
+
+    ax.set_xlabel(
+        "Timestep",
+        fontsize=12,
+        fontweight="bold",
+    )
+
+    ax.set_title(
+        f"{model_name} {sample_type} ECG | Original vs Reconstructed | Sample {sample_index}",
+        fontsize=15,
+        fontweight="bold",
+        pad=14,
+    )
+
+    ax.legend(
+        fontsize=10,
+        loc="upper right",
+    )
+
+    ax.grid(
+        axis="x",
+        alpha=0.2,
+    )
+
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    plt.tight_layout()
 
     if save_path is not None:
         plt.savefig(
