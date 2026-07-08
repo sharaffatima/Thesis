@@ -38,34 +38,35 @@ def plot_original_vs_reconstruction(
     num_leads = len(ECG_LEADS)
 
     LeadSpacing = 1.0
-    SignalHeight = 0.35
+    SignalHeight = 0.45
 
     fig, ax = plt.subplots(
         figsize=(16, 10)
     )
 
+    # One shared scale for all leads in this sample
+    all_values = np.concatenate([
+        original.reshape(-1),
+        reconstructed.reshape(-1),
+    ])
+
+    DisplayScale = np.percentile(
+        np.abs(all_values),
+        99,
+    )
+
+    if DisplayScale == 0:
+        DisplayScale = 1.0
+
     for lead_idx, lead_name in enumerate(ECG_LEADS):
         offset = (num_leads - 1 - lead_idx) * LeadSpacing
 
-        values = np.concatenate([
-            original[:, lead_idx],
-            reconstructed[:, lead_idx],
-        ])
-
-        scale = np.percentile(
-            np.abs(values),
-            99,
-        )
-
-        if scale == 0:
-            scale = 1.0
-
         original_scaled = (
-            original[:, lead_idx] / scale
+            original[:, lead_idx] / DisplayScale
         ) * SignalHeight
 
         reconstructed_scaled = (
-            reconstructed[:, lead_idx] / scale
+            reconstructed[:, lead_idx] / DisplayScale
         ) * SignalHeight
 
         ax.plot(
@@ -85,7 +86,6 @@ def plot_original_vs_reconstruction(
             label="Reconstructed" if lead_idx == 0 else None,
         )
 
-        # horizontal separator line
         ax.axhline(
             offset - 0.5 * LeadSpacing,
             color="gray",
