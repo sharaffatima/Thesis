@@ -33,88 +33,124 @@ def plot_original_vs_reconstruction(
     time_axis,
     save_path=None,
 ):
-    fig, axes = plt.subplots(
-        2,
-        1,
-        figsize=(16, 14),
-        sharex=True,
-    )
-
     OriginalColor = "#1f4e79"       # dark blue
     ReconstructedColor = "#d95f02"  # orange
 
-    LeadSpacing = 1.0
-    SignalHeight = 0.38
-
     num_leads = len(ECG_LEADS)
 
-    def plot_sample(ax, original, reconstructed, title):
-        for lead_idx in range(num_leads):
-            offset = (num_leads - 1 - lead_idx) * LeadSpacing
-
-            values = np.concatenate([
-                original[:, lead_idx],
-                reconstructed[:, lead_idx],
-            ])
-
-            scale = np.max(np.abs(values))
-
-            if scale == 0:
-                scale = 1.0
-
-            original_scaled = (
-                original[:, lead_idx] / scale
-            ) * SignalHeight
-
-            reconstructed_scaled = (
-                reconstructed[:, lead_idx] / scale
-            ) * SignalHeight
-
-            ax.plot(
-                time_axis,
-                original_scaled + offset,
-                color=OriginalColor,
-                linewidth=1.1,
-                label="Original" if lead_idx == 0 else None,
-            )
-
-            ax.plot(
-                time_axis,
-                reconstructed_scaled + offset,
-                color=ReconstructedColor,
-                linestyle="--",
-                linewidth=1.1,
-                label="Reconstructed" if lead_idx == 0 else None,
-            )
-
-        ytick_positions = [
-            (num_leads - 1 - i) * LeadSpacing
-            for i in range(num_leads)
-        ]
-
-        ax.set_yticks(ytick_positions)
-        ax.set_yticklabels(ECG_LEADS)
-        ax.set_ylim(-0.7, num_leads - 0.3)
-        ax.set_ylabel("Lead")
-        ax.set_title(title, fontsize=13, fontweight="bold", pad=12)
-        ax.grid(axis="x", alpha=0.25)
-        ax.legend(fontsize=9, loc="upper right")
-
-    plot_sample(
-        axes[0],
-        normal_original,
-        normal_rec,
-        f"(a) Normal ECG | Sample {norm_index}",
+    fig, axes = plt.subplots(
+        num_leads,
+        2,
+        figsize=(16, 18),
+        sharex=True,
     )
 
-    plot_sample(
-        axes[1],
-        anom_original,
-        anom_rec,
-        f"(b) Anomalous ECG | Sample {anom_index}",
+    for lead_idx, lead_name in enumerate(ECG_LEADS):
+
+        ax_normal = axes[lead_idx, 0]
+        ax_anom = axes[lead_idx, 1]
+
+        # Normal ECG
+        ax_normal.plot(
+            time_axis,
+            normal_original[:, lead_idx],
+            color=OriginalColor,
+            linewidth=1.1,
+            label="Original" if lead_idx == 0 else None,
+        )
+
+        ax_normal.plot(
+            time_axis,
+            normal_rec[:, lead_idx],
+            color=ReconstructedColor,
+            linestyle="--",
+            linewidth=1.1,
+            label="Reconstructed" if lead_idx == 0 else None,
+        )
+
+        # Anomalous ECG
+        ax_anom.plot(
+            time_axis,
+            anom_original[:, lead_idx],
+            color=OriginalColor,
+            linewidth=1.1,
+            label="Original" if lead_idx == 0 else None,
+        )
+
+        ax_anom.plot(
+            time_axis,
+            anom_rec[:, lead_idx],
+            color=ReconstructedColor,
+            linestyle="--",
+            linewidth=1.1,
+            label="Reconstructed" if lead_idx == 0 else None,
+        )
+
+        # Separate y-limits per lead and sample
+        normal_values = np.concatenate([
+            normal_original[:, lead_idx],
+            normal_rec[:, lead_idx],
+        ])
+
+        anom_values = np.concatenate([
+            anom_original[:, lead_idx],
+            anom_rec[:, lead_idx],
+        ])
+
+        normal_min = normal_values.min()
+        normal_max = normal_values.max()
+        normal_margin = (normal_max - normal_min) * 0.15
+
+        anom_min = anom_values.min()
+        anom_max = anom_values.max()
+        anom_margin = (anom_max - anom_min) * 0.15
+
+        ax_normal.set_ylim(
+            normal_min - normal_margin,
+            normal_max + normal_margin,
+        )
+
+        ax_anom.set_ylim(
+            anom_min - anom_margin,
+            anom_max + anom_margin,
+        )
+
+        ax_normal.set_ylabel(
+            lead_name,
+            rotation=0,
+            labelpad=18,
+            fontsize=9,
+        )
+
+        for ax in [ax_normal, ax_anom]:
+            ax.grid(axis="x", alpha=0.25)
+            ax.tick_params(axis="y", labelleft=False)
+            ax.tick_params(axis="x", labelsize=8)
+
+    axes[0, 0].set_title(
+        f"Normal ECG | Sample {norm_index}",
+        fontsize=13,
+        fontweight="bold",
     )
 
-    axes[1].set_xlabel("Timestep")
+    axes[0, 1].set_title(
+        f"Anomalous ECG | Sample {anom_index}",
+        fontsize=13,
+        fontweight="bold",
+    )
+
+    axes[0, 0].legend(
+        fontsize=9,
+        loc="upper right",
+    )
+
+    axes[0, 1].legend(
+        fontsize=9,
+        loc="upper right",
+    )
+
+    axes[-1, 0].set_xlabel("Timestep")
+    axes[-1, 1].set_xlabel("Timestep")
 
     fig.suptitle(
         f"{model_name} Original vs Reconstructed ECG",
@@ -123,10 +159,11 @@ def plot_original_vs_reconstruction(
     )
 
     fig.subplots_adjust(
-        hspace=0.32,
-        top=0.92,
-        bottom=0.07,
-        left=0.07,
+        hspace=0.35,
+        wspace=0.12,
+        top=0.94,
+        bottom=0.05,
+        left=0.06,
         right=0.98,
     )
 
