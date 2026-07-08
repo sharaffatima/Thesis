@@ -41,18 +41,17 @@ def plot_original_vs_reconstruction(
     if reconstructed.ndim == 3:
         reconstructed = reconstructed[0]
 
-    if original.shape[1] != 12:
-        raise ValueError("Original ECG must have shape (T, 12).")
-
-    if reconstructed.shape[1] != 12:
-        raise ValueError("Reconstructed ECG must have shape (T, 12).")
-
     sequence_length = original.shape[0]
-    duration_seconds = sequence_length / sampling_rate
     time_axis = np.arange(sequence_length) / sampling_rate
 
     OriginalColor = "#12263A"       # dark navy
     ReconstructedColor = "#D95F02"  # orange
+    ErrorColor = "#B00020"          # dark red
+
+    num_leads = len(ECG_LEADS)
+
+    LeadSpacing = 1.0
+    SignalHeight = 0.35
 
     figure, axis = plt.subplots(
         figsize=(14, 8)
@@ -60,11 +59,10 @@ def plot_original_vs_reconstruction(
 
     row_positions = np.arange(11, -1, -1)
 
-    for lead_index in range(12):
+    for lead_index in range(num_leads):
         original_signal = original[:, lead_index]
         reconstructed_signal = reconstructed[:, lead_index]
 
-        # Same centering and scaling for original + reconstruction
         combined = np.concatenate([
             original_signal,
             reconstructed_signal,
@@ -72,52 +70,77 @@ def plot_original_vs_reconstruction(
 
         center = np.median(combined)
 
-        original_signal = original_signal - center
-        reconstructed_signal = reconstructed_signal - center
-
-        combined_centered = combined - center
+        original_centered = original_signal - center
+        reconstructed_centered = reconstructed_signal - center
 
         amplitude = np.percentile(
-            np.abs(combined_centered),
+            np.abs(combined - center),
             99,
         )
 
-        if amplitude > 0:
-            original_signal = original_signal / amplitude
-            reconstructed_signal = reconstructed_signal / amplitude
+        if amplitude == 0:
+            amplitude = 1.0
 
-        original_signal = (
-            original_signal * 0.35
-            + row_positions[lead_index]
+        original_plot = (
+            original_centered / amplitude
+        ) * SignalHeight + row_positions[lead_index]
+
+        reconstructed_plot = (
+            reconstructed_centered / amplitude
+        ) * SignalHeight + row_positions[lead_index]
+
+        error = np.abs(
+            original_plot - reconstructed_plot
         )
 
-        reconstructed_signal = (
-            reconstructed_signal * 0.35
-            + row_positions[lead_index]
+        axis.fill_between(
+            time_axis,
+            original_plot,
+            reconstructed_plot,
+            color=ErrorColor,
+            alpha=0.18,
+            linewidth=0,
         )
 
         axis.plot(
             time_axis,
-            original_signal,
+            original_plot,
             color=OriginalColor,
-            linewidth=0.9,
+            linewidth=1.0,
             label="Original" if lead_index == 0 else None,
         )
 
         axis.plot(
             time_axis,
-            reconstructed_signal,
+            reconstructed_plot,
             color=ReconstructedColor,
             linestyle="--",
-            linewidth=0.9,
+            linewidth=1.0,
             label="Reconstructed" if lead_index == 0 else None,
         )
 
-    axis.set_xlim(0, duration_seconds)
-    axis.set_ylim(-0.5, 11.5)
+        axis.axhline(
+            row_positions[lead_index],
+            color="gray",
+            linewidth=0.4,
+            alpha=0.25,
+        )
+
+    axis.set_xlim(
+        0,
+        sequence_length / sampling_rate,
+    )
+
+    axis.set_ylim(
+        -0.5,
+        11.5,
+    )
 
     axis.set_yticks(row_positions)
     axis.set_yticklabels(ECG_LEADS)
+
+    axis.set_xlabel("Time (seconds)")
+    axis.set_ylabel("ECG leads")
 
     axis.set_title(
         f"{model_name} {sample_type} ECG | Original vs Reconstructed | Sample {sample_index}",
@@ -125,12 +148,9 @@ def plot_original_vs_reconstruction(
         fontweight="bold",
     )
 
-    axis.set_xlabel("Time (seconds)")
-    axis.set_ylabel("ECG leads")
-
     axis.grid(
         axis="x",
-        alpha=0.25,
+        alpha=0.2,
     )
 
     axis.legend(
