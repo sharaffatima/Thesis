@@ -220,7 +220,7 @@ class AnoFormerExplainability:
             original=normal_original,
             reconstructed=normal_rec,
             sample_index=NormalIndex,
-            time_axis=time_axis,
+            sampling_rate=100,
             save_path="anoformer_normal_reconstruction.png",
         )
         plot_original_vs_reconstruction(
@@ -229,7 +229,7 @@ class AnoFormerExplainability:
             original=anom_original,
             reconstructed=anom_rec,
             sample_index=AnomalousIndex,
-            time_axis=time_axis,
+            sampling_rate=100,
             save_path="anoformer_anomalous_reconstruction.png",
         )
 
