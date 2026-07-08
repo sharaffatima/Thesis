@@ -248,7 +248,6 @@ class TranADExplainability:
             anom_rec=anom_rec,
             anom_index=AnomalousIndex,
             time_axis=time_axis,
-            save_path="tranad_original_vs_reconstruction.png",
         )
 
         # Figure 2: Attention vs Reconstruction Error

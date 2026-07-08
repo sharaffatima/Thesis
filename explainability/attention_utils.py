@@ -9,6 +9,20 @@ ECG_LEADS = [
     "V4", "V5", "V6"
 ]
 
+LEAD_GROUPS = [
+    [0, 1, 2],
+    [3, 4, 5],
+    [6, 7, 8],
+    [9, 10, 11],
+]
+
+GROUP_TITLES = [
+    "Leads I, II, III",
+    "Leads aVR, aVL, aVF",
+    "Leads V1, V2, V3",
+    "Leads V4, V5, V6",
+]
+
 BaseCmap = plt.get_cmap("RdYlBu_r")
 
 BrightCmap = LinearSegmentedColormap.from_list(
@@ -24,149 +38,115 @@ BrightCmap = LinearSegmentedColormap.from_list(
 
 
 def plot_original_vs_reconstruction(
-    model_name,
-    sample_type,
-    original,
-    reconstructed,
-    sample_index,
-    sampling_rate=100,
-    save_path=None,
-):
-    original = np.asarray(original)
-    reconstructed = np.asarray(reconstructed)
+        model_name,
+        normal_original, 
+        normal_rec, 
+        norm_index, 
+        anom_original, 
+        anom_rec, 
+        anom_index, 
+        time_axis):
+    
+    fig1, axes1 = plt.subplots(4, 2, figsize=(22, 12), sharex=True)
 
-    if original.ndim == 3:
-        original = original[0]
+    for group_idx, lead_group in enumerate(LEAD_GROUPS):
+        ax_normal = axes1[group_idx, 0]
+        ax_anom = axes1[group_idx, 1]
 
-    if reconstructed.ndim == 3:
-        reconstructed = reconstructed[0]
+        group_values = []
 
-    sequence_length = original.shape[0]
-    time_axis = np.arange(sequence_length) / sampling_rate
+        for lead_idx in lead_group:
+            group_values.extend([
+                normal_original[:, lead_idx],
+                normal_rec[:, lead_idx],
+                anom_original[:, lead_idx],
+                anom_rec[:, lead_idx],
+            ])
 
-    OriginalColor = "#12263A"       # dark navy
-    ReconstructedColor = "#D95F02"  # orange
-    ErrorColor = "#B00020"          # dark red
+        group_values = np.concatenate(group_values)
 
-    num_leads = len(ECG_LEADS)
+        group_low = np.percentile(group_values, 1)
+        group_high = np.percentile(group_values, 99)
+        group_range = group_high - group_low
 
-    LeadSpacing = 1.0
-    SignalHeight = 0.35
+        LeadOffset = max(group_range * 1.4, 1.5)
 
-    figure, axis = plt.subplots(
-        figsize=(14, 8)
-    )
+        for local_idx, lead_idx in enumerate(lead_group):
+            offset = (len(lead_group) - 1 - local_idx) * LeadOffset
 
-    row_positions = np.arange(11, -1, -1)
+            ax_normal.plot(
+                time_axis,
+                normal_original[:, lead_idx] + offset,
+                linewidth=0.8,
+                label="Original" if group_idx == 0 and local_idx == 0 else None,
+            )
 
-    for lead_index in range(num_leads):
-        original_signal = original[:, lead_index]
-        reconstructed_signal = reconstructed[:, lead_index]
+            ax_normal.plot(
+                time_axis,
+                normal_rec[:, lead_idx] + offset,
+                linestyle="--",
+                linewidth=0.8,
+                label="Reconstructed" if group_idx == 0 and local_idx == 0 else None,
+            )
 
-        combined = np.concatenate([
-            original_signal,
-            reconstructed_signal,
-        ])
+            ax_anom.plot(
+                time_axis,
+                anom_original[:, lead_idx] + offset,
+                linewidth=0.8,
+                label="Original" if group_idx == 0 and local_idx == 0 else None,
+            )
 
-        center = np.median(combined)
+            ax_anom.plot(
+                time_axis,
+                anom_rec[:, lead_idx] + offset,
+                linestyle="--",
+                linewidth=0.8,
+                label="Reconstructed" if group_idx == 0 and local_idx == 0 else None,
+            )
 
-        original_centered = original_signal - center
-        reconstructed_centered = reconstructed_signal - center
+        ytick_positions = [
+            (len(lead_group) - 1 - i) * LeadOffset
+            for i in range(len(lead_group))
+        ]
 
-        amplitude = np.percentile(
-            np.abs(combined - center),
-            99,
+        ytick_labels = [
+            ECG_LEADS[lead_idx]
+            for lead_idx in lead_group
+        ]
+
+        y_min = -0.75 * LeadOffset
+        y_max = (len(lead_group) - 1) * LeadOffset + 0.75 * LeadOffset
+
+        for ax in [ax_normal, ax_anom]:
+            ax.set_yticks(ytick_positions)
+            ax.set_yticklabels(ytick_labels)
+            ax.set_ylim(y_min, y_max)
+            ax.grid(alpha=0.25)
+
+            # NEW: show x-axis on every subplot
+            ax.tick_params(axis="x", labelbottom=True)
+            ax.set_xlabel("Timestep")
+
+        ax_normal.set_title(
+            f"Normal ECG | {GROUP_TITLES[group_idx]}",
+            fontsize=10,
         )
 
-        if amplitude == 0:
-            amplitude = 1.0
-
-        original_plot = (
-            original_centered / amplitude
-        ) * SignalHeight + row_positions[lead_index]
-
-        reconstructed_plot = (
-            reconstructed_centered / amplitude
-        ) * SignalHeight + row_positions[lead_index]
-
-        error = np.abs(
-            original_plot - reconstructed_plot
+        ax_anom.set_title(
+            f"Anomalous ECG | {GROUP_TITLES[group_idx]}",
+            fontsize=10,
         )
 
-        axis.fill_between(
-            time_axis,
-            original_plot,
-            reconstructed_plot,
-            color=ErrorColor,
-            alpha=0.18,
-            linewidth=0,
-        )
+    axes1[0, 0].legend(fontsize=8, loc="upper right")
+    axes1[0, 1].legend(fontsize=8, loc="upper right")
 
-        axis.plot(
-            time_axis,
-            original_plot,
-            color=OriginalColor,
-            linewidth=1.0,
-            label="Original" if lead_index == 0 else None,
-        )
-
-        axis.plot(
-            time_axis,
-            reconstructed_plot,
-            color=ReconstructedColor,
-            linestyle="--",
-            linewidth=1.0,
-            label="Reconstructed" if lead_index == 0 else None,
-        )
-
-        axis.axhline(
-            row_positions[lead_index],
-            color="gray",
-            linewidth=0.4,
-            alpha=0.25,
-        )
-
-    axis.set_xlim(
-        0,
-        sequence_length / sampling_rate,
-    )
-
-    axis.set_ylim(
-        -0.5,
-        11.5,
-    )
-
-    axis.set_yticks(row_positions)
-    axis.set_yticklabels(ECG_LEADS)
-
-    axis.set_xlabel("Time (seconds)")
-    axis.set_ylabel("ECG leads")
-
-    axis.set_title(
-        f"{model_name} {sample_type} ECG | Original vs Reconstructed | Sample {sample_index}",
-        fontsize=14,
+    fig1.suptitle(
+        f"{model_name} Original vs Reconstructed ECG | Normal Sample {norm_index} vs Anomalous Sample {anom_index}",
+        fontsize=16,
         fontweight="bold",
     )
 
-    axis.grid(
-        axis="x",
-        alpha=0.2,
-    )
-
-    axis.legend(
-        fontsize=9,
-        loc="upper right",
-    )
-
-    figure.tight_layout()
-
-    if save_path is not None:
-        figure.savefig(
-            save_path,
-            dpi=300,
-            bbox_inches="tight",
-        )
-
+    plt.tight_layout()
     plt.show()
 
 
