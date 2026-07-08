@@ -50,12 +50,14 @@ def plot_original_vs_reconstruction(
         ax_normal = axes[lead_idx, 0]
         ax_anom = axes[lead_idx, 1]
 
-        # Normal ECG
+        # -----------------------------
+        # Plot normal ECG
+        # -----------------------------
         ax_normal.plot(
             time_axis,
             normal_original[:, lead_idx],
             color=OriginalColor,
-            linewidth=1.1,
+            linewidth=1.0,
             label="Original" if lead_idx == 0 else None,
         )
 
@@ -64,16 +66,18 @@ def plot_original_vs_reconstruction(
             normal_rec[:, lead_idx],
             color=ReconstructedColor,
             linestyle="--",
-            linewidth=1.1,
+            linewidth=1.0,
             label="Reconstructed" if lead_idx == 0 else None,
         )
 
-        # Anomalous ECG
+        # -----------------------------
+        # Plot anomalous ECG
+        # -----------------------------
         ax_anom.plot(
             time_axis,
             anom_original[:, lead_idx],
             color=OriginalColor,
-            linewidth=1.1,
+            linewidth=1.0,
             label="Original" if lead_idx == 0 else None,
         )
 
@@ -82,38 +86,36 @@ def plot_original_vs_reconstruction(
             anom_rec[:, lead_idx],
             color=ReconstructedColor,
             linestyle="--",
-            linewidth=1.1,
+            linewidth=1.0,
             label="Reconstructed" if lead_idx == 0 else None,
         )
 
-        # Separate y-limits per lead and sample
-        normal_values = np.concatenate([
+        # -----------------------------
+        # Shared y-scale for this lead
+        # -----------------------------
+        lead_values = np.concatenate([
             normal_original[:, lead_idx],
             normal_rec[:, lead_idx],
-        ])
-
-        anom_values = np.concatenate([
             anom_original[:, lead_idx],
             anom_rec[:, lead_idx],
         ])
 
-        normal_min = normal_values.min()
-        normal_max = normal_values.max()
-        normal_margin = (normal_max - normal_min) * 0.15
+        y_min = lead_values.min()
+        y_max = lead_values.max()
+        y_margin = (y_max - y_min) * 0.15
 
-        anom_min = anom_values.min()
-        anom_max = anom_values.max()
-        anom_margin = (anom_max - anom_min) * 0.15
+        if y_margin == 0:
+            y_margin = 0.1
 
-        ax_normal.set_ylim(
-            normal_min - normal_margin,
-            normal_max + normal_margin,
-        )
+        for ax in [ax_normal, ax_anom]:
+            ax.set_ylim(
+                y_min - y_margin,
+                y_max + y_margin,
+            )
 
-        ax_anom.set_ylim(
-            anom_min - anom_margin,
-            anom_max + anom_margin,
-        )
+            ax.grid(axis="x", alpha=0.25)
+            ax.tick_params(axis="y", labelleft=False)
+            ax.tick_params(axis="x", labelsize=8)
 
         ax_normal.set_ylabel(
             lead_name,
@@ -121,11 +123,6 @@ def plot_original_vs_reconstruction(
             labelpad=18,
             fontsize=9,
         )
-
-        for ax in [ax_normal, ax_anom]:
-            ax.grid(axis="x", alpha=0.25)
-            ax.tick_params(axis="y", labelleft=False)
-            ax.tick_params(axis="x", labelsize=8)
 
     axes[0, 0].set_title(
         f"Normal ECG | Sample {norm_index}",
