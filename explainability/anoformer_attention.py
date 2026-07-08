@@ -216,13 +216,14 @@ class AnoFormerExplainability:
         #Figure 1: Original vs Reconstruction
         plot_original_vs_reconstruction(
             model_name="AnoFormer",
-            normal_original = normal_original, 
-            normal_rec = normal_rec, 
-            norm_index = NormalIndex, 
-            anom_original = anom_original, 
-            anom_rec = anom_rec, 
-            anom_index = AnomalousIndex,
-            time_axis = time_axis
+            normal_original=normal_original,
+            normal_rec=normal_rec,
+            norm_index=NormalIndex,
+            anom_original=anom_original,
+            anom_rec=anom_rec,
+            anom_index=AnomalousIndex,
+            time_axis=time_axis,
+            save_path="anoformer_original_vs_reconstruction.png",
         )
 
 
