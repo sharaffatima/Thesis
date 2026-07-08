@@ -23,7 +23,7 @@ BrightCmap = LinearSegmentedColormap.from_list(
 )
 
 
-def plot_ecg_style_reconstruction(
+def plot_original_vs_reconstruction(
     model_name,
     sample_type,
     original,
