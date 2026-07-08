@@ -22,147 +22,109 @@ BrightCmap = LinearSegmentedColormap.from_list(
     ),
 )
 
-def plot_original_vs_reconstruction(
+
+def plot_ecg_style_reconstruction(
     model_name,
-    normal_original,
-    normal_rec,
-    norm_index,
-    anom_original,
-    anom_rec,
-    anom_index,
+    sample_type,
+    original,
+    reconstructed,
+    sample_index,
     time_axis,
     save_path=None,
 ):
+    layout = [
+        ["I", "aVR", "V1", "V4"],
+        ["II", "aVL", "V2", "V5"],
+        ["III", "aVF", "V3", "V6"],
+    ]
+
     OriginalColor = "#1f4e79"       # dark blue
     ReconstructedColor = "#d95f02"  # orange
 
-    num_leads = len(ECG_LEADS)
-
     fig, axes = plt.subplots(
-        num_leads,
-        2,
-        figsize=(16, 18),
+        3,
+        4,
+        figsize=(16, 7),
         sharex=True,
     )
 
-    for lead_idx, lead_name in enumerate(ECG_LEADS):
+    for row_idx in range(3):
+        for col_idx in range(4):
+            lead_name = layout[row_idx][col_idx]
+            lead_idx = ECG_LEADS.index(lead_name)
 
-        ax_normal = axes[lead_idx, 0]
-        ax_anom = axes[lead_idx, 1]
+            ax = axes[row_idx, col_idx]
 
-        # -----------------------------
-        # Plot normal ECG
-        # -----------------------------
-        ax_normal.plot(
-            time_axis,
-            normal_original[:, lead_idx],
-            color=OriginalColor,
-            linewidth=1.0,
-            label="Original" if lead_idx == 0 else None,
-        )
-
-        ax_normal.plot(
-            time_axis,
-            normal_rec[:, lead_idx],
-            color=ReconstructedColor,
-            linestyle="--",
-            linewidth=1.0,
-            label="Reconstructed" if lead_idx == 0 else None,
-        )
-
-        # -----------------------------
-        # Plot anomalous ECG
-        # -----------------------------
-        ax_anom.plot(
-            time_axis,
-            anom_original[:, lead_idx],
-            color=OriginalColor,
-            linewidth=1.0,
-            label="Original" if lead_idx == 0 else None,
-        )
-
-        ax_anom.plot(
-            time_axis,
-            anom_rec[:, lead_idx],
-            color=ReconstructedColor,
-            linestyle="--",
-            linewidth=1.0,
-            label="Reconstructed" if lead_idx == 0 else None,
-        )
-
-        # -----------------------------
-        # Shared y-scale for this lead
-        # -----------------------------
-        lead_values = np.concatenate([
-            normal_original[:, lead_idx],
-            normal_rec[:, lead_idx],
-            anom_original[:, lead_idx],
-            anom_rec[:, lead_idx],
-        ])
-
-        y_min = lead_values.min()
-        y_max = lead_values.max()
-        y_margin = (y_max - y_min) * 0.15
-
-        if y_margin == 0:
-            y_margin = 0.1
-
-        for ax in [ax_normal, ax_anom]:
-            ax.set_ylim(
-                y_min - y_margin,
-                y_max + y_margin,
+            ax.plot(
+                time_axis,
+                original[:, lead_idx],
+                color=OriginalColor,
+                linewidth=1.1,
+                label="Original" if row_idx == 0 and col_idx == 0 else None,
             )
 
-            ax.grid(axis="x", alpha=0.25)
-            ax.tick_params(axis="y", labelleft=False)
-            ax.tick_params(axis="x", labelsize=8)
+            ax.plot(
+                time_axis,
+                reconstructed[:, lead_idx],
+                color=ReconstructedColor,
+                linestyle="--",
+                linewidth=1.1,
+                label="Reconstructed" if row_idx == 0 and col_idx == 0 else None,
+            )
 
-        ax_normal.set_ylabel(
-            lead_name,
-            rotation=0,
-            labelpad=18,
-            fontsize=9,
-        )
+            values = np.concatenate([
+                original[:, lead_idx],
+                reconstructed[:, lead_idx],
+            ])
 
-    axes[0, 0].set_title(
-        f"Normal ECG | Sample {norm_index}",
-        fontsize=13,
-        fontweight="bold",
-    )
+            y_min = values.min()
+            y_max = values.max()
+            margin = (y_max - y_min) * 0.20
 
-    axes[0, 1].set_title(
-        f"Anomalous ECG | Sample {anom_index}",
-        fontsize=13,
-        fontweight="bold",
-    )
+            if margin == 0:
+                margin = 0.1
+
+            ax.set_ylim(
+                y_min - margin,
+                y_max + margin,
+            )
+
+            ax.text(
+                0.02,
+                0.85,
+                lead_name,
+                transform=ax.transAxes,
+                fontsize=12,
+                fontweight="bold",
+            )
+
+            ax.grid(
+                True,
+                alpha=0.25,
+            )
+
+            ax.tick_params(
+                axis="both",
+                labelsize=8,
+            )
+
+            ax.set_yticklabels([])
 
     axes[0, 0].legend(
         fontsize=9,
         loc="upper right",
     )
 
-    axes[0, 1].legend(
-        fontsize=9,
-        loc="upper right",
-    )
-
-    axes[-1, 0].set_xlabel("Timestep")
-    axes[-1, 1].set_xlabel("Timestep")
+    for ax in axes[-1, :]:
+        ax.set_xlabel("Timestep")
 
     fig.suptitle(
-        f"{model_name} Original vs Reconstructed ECG",
+        f"{model_name} {sample_type} ECG | Original vs Reconstructed | Sample {sample_index}",
         fontsize=16,
         fontweight="bold",
     )
 
-    fig.subplots_adjust(
-        hspace=0.35,
-        wspace=0.12,
-        top=0.94,
-        bottom=0.05,
-        left=0.06,
-        right=0.98,
-    )
+    plt.tight_layout(rect=[0, 0, 1, 0.94])
 
     if save_path is not None:
         plt.savefig(
