@@ -40,92 +40,81 @@ def plot_original_vs_reconstruction(
         sharex=True,
     )
 
-    ax_normal = axes[0]
-    ax_anom = axes[1]
-
     OriginalColor = "#1f4e79"       # dark blue
     ReconstructedColor = "#d95f02"  # orange
 
-    all_values = np.concatenate([
-        normal_original.reshape(-1),
-        normal_rec.reshape(-1),
-        anom_original.reshape(-1),
-        anom_rec.reshape(-1),
-    ])
-
-    max_amplitude = np.max(np.abs(all_values))
-    LeadOffset = max(max_amplitude * 2.8, 2.0)
+    LeadSpacing = 1.0
+    SignalHeight = 0.38
 
     num_leads = len(ECG_LEADS)
 
-    for lead_position, lead_idx in enumerate(range(num_leads)):
-        offset = (num_leads - 1 - lead_position) * LeadOffset
+    def plot_sample(ax, original, reconstructed, title):
+        for lead_idx in range(num_leads):
+            offset = (num_leads - 1 - lead_idx) * LeadSpacing
 
-        ax_normal.plot(
-            time_axis,
-            normal_original[:, lead_idx] + offset,
-            color=OriginalColor,
-            linewidth=1.1,
-            label="Original" if lead_position == 0 else None,
-        )
+            values = np.concatenate([
+                original[:, lead_idx],
+                reconstructed[:, lead_idx],
+            ])
 
-        ax_normal.plot(
-            time_axis,
-            normal_rec[:, lead_idx] + offset,
-            color=ReconstructedColor,
-            linestyle="--",
-            linewidth=1.1,
-            label="Reconstructed" if lead_position == 0 else None,
-        )
+            scale = np.max(np.abs(values))
 
-        ax_anom.plot(
-            time_axis,
-            anom_original[:, lead_idx] + offset,
-            color=OriginalColor,
-            linewidth=1.1,
-            label="Original" if lead_position == 0 else None,
-        )
+            if scale == 0:
+                scale = 1.0
 
-        ax_anom.plot(
-            time_axis,
-            anom_rec[:, lead_idx] + offset,
-            color=ReconstructedColor,
-            linestyle="--",
-            linewidth=1.1,
-            label="Reconstructed" if lead_position == 0 else None,
-        )
+            original_scaled = (
+                original[:, lead_idx] / scale
+            ) * SignalHeight
 
-    ytick_positions = [
-        (num_leads - 1 - i) * LeadOffset
-        for i in range(num_leads)
-    ]
+            reconstructed_scaled = (
+                reconstructed[:, lead_idx] / scale
+            ) * SignalHeight
 
-    y_min = -1.0 * LeadOffset
-    y_max = (num_leads - 1) * LeadOffset + 1.0 * LeadOffset
+            ax.plot(
+                time_axis,
+                original_scaled + offset,
+                color=OriginalColor,
+                linewidth=1.1,
+                label="Original" if lead_idx == 0 else None,
+            )
 
-    for ax in [ax_normal, ax_anom]:
+            ax.plot(
+                time_axis,
+                reconstructed_scaled + offset,
+                color=ReconstructedColor,
+                linestyle="--",
+                linewidth=1.1,
+                label="Reconstructed" if lead_idx == 0 else None,
+            )
+
+        ytick_positions = [
+            (num_leads - 1 - i) * LeadSpacing
+            for i in range(num_leads)
+        ]
+
         ax.set_yticks(ytick_positions)
         ax.set_yticklabels(ECG_LEADS)
-        ax.set_ylim(y_min, y_max)
+        ax.set_ylim(-0.7, num_leads - 0.3)
         ax.set_ylabel("Lead")
+        ax.set_title(title, fontsize=13, fontweight="bold", pad=12)
         ax.grid(axis="x", alpha=0.25)
         ax.legend(fontsize=9, loc="upper right")
 
-    ax_normal.set_title(
+    plot_sample(
+        axes[0],
+        normal_original,
+        normal_rec,
         f"(a) Normal ECG | Sample {norm_index}",
-        fontsize=13,
-        fontweight="bold",
-        pad=12,
     )
 
-    ax_anom.set_title(
+    plot_sample(
+        axes[1],
+        anom_original,
+        anom_rec,
         f"(b) Anomalous ECG | Sample {anom_index}",
-        fontsize=13,
-        fontweight="bold",
-        pad=12,
     )
 
-    ax_anom.set_xlabel("Timestep")
+    axes[1].set_xlabel("Timestep")
 
     fig.suptitle(
         f"{model_name} Original vs Reconstructed ECG",
@@ -133,10 +122,18 @@ def plot_original_vs_reconstruction(
         fontweight="bold",
     )
 
+    fig.subplots_adjust(
+        hspace=0.32,
+        top=0.92,
+        bottom=0.07,
+        left=0.07,
+        right=0.98,
+    )
+
     if save_path is not None:
         plt.savefig(
             save_path,
-            dpi=400,
+            dpi=300,
             bbox_inches="tight",
         )
 
