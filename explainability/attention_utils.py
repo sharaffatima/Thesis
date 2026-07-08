@@ -36,9 +36,8 @@ def plot_original_vs_reconstruction(
     fig, axes = plt.subplots(
         2,
         1,
-        figsize=(16, 12),
+        figsize=(16, 14),
         sharex=True,
-        gridspec_kw={"hspace": 0.28},
     )
 
     ax_normal = axes[0]
@@ -58,14 +57,14 @@ def plot_original_vs_reconstruction(
     value_high = np.percentile(all_values, 99)
     value_range = value_high - value_low
 
-    LeadOffset = max(value_range * 1.4, 1.5)
+    # Bigger distance between leads
+    LeadOffset = max(value_range * 1.9, 2.0)
 
     num_leads = len(ECG_LEADS)
 
     for lead_position, lead_idx in enumerate(range(num_leads)):
         offset = (num_leads - 1 - lead_position) * LeadOffset
 
-        # Normal ECG
         ax_normal.plot(
             time_axis,
             normal_original[:, lead_idx] + offset,
@@ -83,7 +82,6 @@ def plot_original_vs_reconstruction(
             label="Reconstructed" if lead_position == 0 else None,
         )
 
-        # Anomalous ECG
         ax_anom.plot(
             time_axis,
             anom_original[:, lead_idx] + offset,
@@ -106,13 +104,13 @@ def plot_original_vs_reconstruction(
         for i in range(num_leads)
     ]
 
+    y_min = -1.0 * LeadOffset
+    y_max = (num_leads - 1) * LeadOffset + 1.0 * LeadOffset
+
     for ax in [ax_normal, ax_anom]:
         ax.set_yticks(ytick_positions)
         ax.set_yticklabels(ECG_LEADS)
-        ax.set_ylim(
-            -0.75 * LeadOffset,
-            (num_leads - 1) * LeadOffset + 0.75 * LeadOffset,
-        )
+        ax.set_ylim(y_min, y_max)
         ax.set_ylabel("Lead")
         ax.grid(axis="x", alpha=0.25)
         ax.legend(fontsize=9, loc="upper right")
@@ -121,12 +119,14 @@ def plot_original_vs_reconstruction(
         f"(a) Normal ECG | Sample {norm_index}",
         fontsize=13,
         fontweight="bold",
+        pad=12,
     )
 
     ax_anom.set_title(
         f"(b) Anomalous ECG | Sample {anom_index}",
         fontsize=13,
         fontweight="bold",
+        pad=12,
     )
 
     ax_anom.set_xlabel("Timestep")
@@ -136,8 +136,6 @@ def plot_original_vs_reconstruction(
         fontsize=16,
         fontweight="bold",
     )
-
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
 
     if save_path is not None:
         plt.savefig(
