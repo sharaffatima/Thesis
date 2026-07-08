@@ -36,16 +36,6 @@ BrightCmap = LinearSegmentedColormap.from_list(
     ),
 )
 
-def normalize_for_plot(values):
-    values = np.asarray(values)
-
-    max_value = np.max(values)
-
-    if max_value == 0:
-        return values
-
-    return values / max_value
-
 def plot_original_vs_reconstruction(
         model_name,
         normal_original, 
