@@ -53,12 +53,8 @@ def plot_original_vs_reconstruction(
         anom_rec.reshape(-1),
     ])
 
-    value_low = np.percentile(all_values, 1)
-    value_high = np.percentile(all_values, 99)
-    value_range = value_high - value_low
-
-    # Bigger distance between leads
-    LeadOffset = max(value_range * 1.9, 2.0)
+    max_amplitude = np.max(np.abs(all_values))
+    LeadOffset = max(max_amplitude * 2.8, 2.0)
 
     num_leads = len(ECG_LEADS)
 
