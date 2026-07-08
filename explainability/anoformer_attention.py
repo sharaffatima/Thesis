@@ -354,25 +354,95 @@ class AnoFormerExplainability:
             print("No training history available.")
             return
 
-        fig, axes = plt.subplots(1, 2, figsize=(13, 4))
+        epochs = np.arange(
+            1,
+            len(History["GeneratorTotalLoss"]) + 1,
+        )
 
-        epochs = range(1, len(History["GeneratorTotalLoss"]) + 1)
+        standard_epochs = epochs % 2 == 1
+        guided_epochs = epochs % 2 == 0
 
-        axes[0].plot(epochs, History["GeneratorTotalLoss"], label="G total", linewidth=1.5)
-        axes[0].plot(epochs, History["GeneratorGANLoss"], label="G GAN", linewidth=1.2, linestyle="--")
-        axes[0].plot(epochs, History["GeneratorRecLoss"], label="G reconstruction", linewidth=1.2, linestyle=":")
-        axes[0].set_title("Generator loss")
+        generator_total = np.asarray(
+            History["GeneratorTotalLoss"]
+        )
+
+        generator_rec = np.asarray(
+            History["GeneratorRecLoss"]
+        )
+
+        discriminator_loss = np.asarray(
+            History["DiscriminatorLoss"]
+        )
+
+        fig, axes = plt.subplots(
+            1,
+            3,
+            figsize=(16, 4),
+        )
+
+        axes[0].plot(
+            epochs[standard_epochs],
+            generator_total[standard_epochs],
+            marker="o",
+            label="Standard masking",
+        )
+
+        axes[0].plot(
+            epochs[guided_epochs],
+            generator_total[guided_epochs],
+            marker="o",
+            label="Error-guided masking",
+        )
+
+        axes[0].set_title("Generator total loss")
         axes[0].set_xlabel("Epoch")
         axes[0].legend()
         axes[0].grid(alpha=0.3)
 
-        axes[1].plot(epochs, History["DiscriminatorLoss"], label="D loss", linewidth=1.5)
-        axes[1].set_title("Discriminator loss")
+
+        axes[1].plot(
+            epochs[standard_epochs],
+            generator_rec[standard_epochs],
+            marker="o",
+            label="Standard masking",
+        )
+
+        axes[1].plot(
+            epochs[guided_epochs],
+            generator_rec[guided_epochs],
+            marker="o",
+            label="Error-guided masking",
+        )
+
+        axes[1].set_title("Reconstruction loss")
         axes[1].set_xlabel("Epoch")
         axes[1].legend()
         axes[1].grid(alpha=0.3)
 
-        plt.suptitle("AnoFormer Training History", fontweight="bold")
+
+        axes[2].plot(
+            epochs[standard_epochs],
+            discriminator_loss[standard_epochs],
+            marker="o",
+            label="Standard masking",
+        )
+
+        axes[2].plot(
+            epochs[guided_epochs],
+            discriminator_loss[guided_epochs],
+            marker="o",
+            label="Error-guided masking",
+        )
+
+        axes[2].set_title("Discriminator loss")
+        axes[2].set_xlabel("Epoch")
+        axes[2].legend()
+        axes[2].grid(alpha=0.3)
+
+        plt.suptitle(
+            "AnoFormer Training History by Masking Strategy",
+            fontweight="bold",
+        )
+
         plt.tight_layout()
         plt.show()
-
