@@ -223,6 +223,15 @@ class AnoFormerExplainability:
             time_axis = time_axis 
         )
 
+        error_ymax = max(
+            np.max(normal_error),
+            np.max(anom_error),
+        ) * 1.05
+
+        attention_ymax = max(
+            np.max(normal_att_imp),
+            np.max(anom_att_imp),
+        ) * 1.05
 
         # Figure 2: Attention vs Reconstruction Error
         fig2, axes2 = plt.subplots(1, 2, figsize=(20, 5), sharex=True)
@@ -232,7 +241,9 @@ class AnoFormerExplainability:
             normal_error,
             normal_att_imp,
             f"Normal ECG | Sample {NormalIndex}",
-            time_axis=time_axis
+            time_axis=time_axis,
+            error_ymax=error_ymax,
+            attention_ymax=attention_ymax,
         )
 
         plot_attention_vs_error(
@@ -240,7 +251,9 @@ class AnoFormerExplainability:
             anom_error,
             anom_att_imp,
             f"Anomalous ECG | Sample {AnomalousIndex}",
-            time_axis=time_axis
+            time_axis=time_axis,
+            error_ymax=error_ymax,
+            attention_ymax=attention_ymax,
         )
 
         fig2.suptitle(
@@ -253,6 +266,8 @@ class AnoFormerExplainability:
 
         plt.tight_layout()
         plt.show()
+
+
 
         # Figure 3: Attention Heatmaps
         fig3, axes3 = plt.subplots(1, 2, figsize=(18, 6))
