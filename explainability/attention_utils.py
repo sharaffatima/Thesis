@@ -29,117 +29,119 @@ def plot_original_vs_reconstruction(
     original,
     reconstructed,
     sample_index,
-    time_axis,
+    sampling_rate=100,
     save_path=None,
 ):
-    OriginalColor = "#1f4e79"       # dark blue
-    ReconstructedColor = "#d95f02"  # orange
+    original = np.asarray(original)
+    reconstructed = np.asarray(reconstructed)
 
-    num_leads = len(ECG_LEADS)
+    if original.ndim == 3:
+        original = original[0]
 
-    LeadSpacing = 1.0
-    SignalHeight = 0.45
+    if reconstructed.ndim == 3:
+        reconstructed = reconstructed[0]
 
-    fig, ax = plt.subplots(
-        figsize=(16, 10)
+    if original.shape[1] != 12:
+        raise ValueError("Original ECG must have shape (T, 12).")
+
+    if reconstructed.shape[1] != 12:
+        raise ValueError("Reconstructed ECG must have shape (T, 12).")
+
+    sequence_length = original.shape[0]
+    duration_seconds = sequence_length / sampling_rate
+    time_axis = np.arange(sequence_length) / sampling_rate
+
+    OriginalColor = "#12263A"       # dark navy
+    ReconstructedColor = "#D95F02"  # orange
+
+    figure, axis = plt.subplots(
+        figsize=(14, 8)
     )
 
-    # One shared scale for all leads in this sample
-    all_values = np.concatenate([
-        original.reshape(-1),
-        reconstructed.reshape(-1),
-    ])
+    row_positions = np.arange(11, -1, -1)
 
-    DisplayScale = np.percentile(
-        np.abs(all_values),
-        99,
-    )
+    for lead_index in range(12):
+        original_signal = original[:, lead_index]
+        reconstructed_signal = reconstructed[:, lead_index]
 
-    if DisplayScale == 0:
-        DisplayScale = 1.0
+        # Same centering and scaling for original + reconstruction
+        combined = np.concatenate([
+            original_signal,
+            reconstructed_signal,
+        ])
 
-    for lead_idx, lead_name in enumerate(ECG_LEADS):
-        offset = (num_leads - 1 - lead_idx) * LeadSpacing
+        center = np.median(combined)
 
-        original_scaled = (
-            original[:, lead_idx] / DisplayScale
-        ) * SignalHeight
+        original_signal = original_signal - center
+        reconstructed_signal = reconstructed_signal - center
 
-        reconstructed_scaled = (
-            reconstructed[:, lead_idx] / DisplayScale
-        ) * SignalHeight
+        combined_centered = combined - center
 
-        ax.plot(
-            time_axis,
-            original_scaled + offset,
-            color=OriginalColor,
-            linewidth=1.2,
-            label="Original" if lead_idx == 0 else None,
+        amplitude = np.percentile(
+            np.abs(combined_centered),
+            99,
         )
 
-        ax.plot(
+        if amplitude > 0:
+            original_signal = original_signal / amplitude
+            reconstructed_signal = reconstructed_signal / amplitude
+
+        original_signal = (
+            original_signal * 0.35
+            + row_positions[lead_index]
+        )
+
+        reconstructed_signal = (
+            reconstructed_signal * 0.35
+            + row_positions[lead_index]
+        )
+
+        axis.plot(
             time_axis,
-            reconstructed_scaled + offset,
+            original_signal,
+            color=OriginalColor,
+            linewidth=0.9,
+            label="Original" if lead_index == 0 else None,
+        )
+
+        axis.plot(
+            time_axis,
+            reconstructed_signal,
             color=ReconstructedColor,
             linestyle="--",
-            linewidth=1.2,
-            label="Reconstructed" if lead_idx == 0 else None,
+            linewidth=0.9,
+            label="Reconstructed" if lead_index == 0 else None,
         )
 
-        ax.axhline(
-            offset - 0.5 * LeadSpacing,
-            color="gray",
-            linewidth=0.6,
-            alpha=0.3,
-        )
+    axis.set_xlim(0, duration_seconds)
+    axis.set_ylim(-0.5, 11.5)
 
-    ytick_positions = [
-        (num_leads - 1 - i) * LeadSpacing
-        for i in range(num_leads)
-    ]
+    axis.set_yticks(row_positions)
+    axis.set_yticklabels(ECG_LEADS)
 
-    ax.set_yticks(ytick_positions)
-    ax.set_yticklabels(
-        ECG_LEADS,
-        fontsize=12,
-        fontweight="bold",
-    )
-
-    ax.set_ylim(
-        -0.7,
-        num_leads - 0.3,
-    )
-
-    ax.set_xlabel(
-        "Timestep",
-        fontsize=12,
-        fontweight="bold",
-    )
-
-    ax.set_title(
+    axis.set_title(
         f"{model_name} {sample_type} ECG | Original vs Reconstructed | Sample {sample_index}",
-        fontsize=15,
+        fontsize=14,
         fontweight="bold",
-        pad=14,
     )
 
-    ax.legend(
-        fontsize=10,
+    axis.set_xlabel("Time (seconds)")
+    axis.set_ylabel("ECG leads")
+
+    axis.grid(
+        axis="x",
+        alpha=0.25,
+    )
+
+    axis.legend(
+        fontsize=9,
         loc="upper right",
     )
 
-    ax.grid(
-        axis="x",
-        alpha=0.2,
-    )
-
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-
-    plt.tight_layout()
+    figure.tight_layout()
 
     if save_path is not None:
-        plt.savefig(
+        figure.savefig(
             save_path,
             dpi=300,
             bbox_inches="tight",
