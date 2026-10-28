@@ -5,6 +5,35 @@ explainable anomaly detection in medical time series. The project focuses on
 Transformer-based anomaly detection models and compares explanation methods,
 specifically attention visualizations and SHAP feature attribution.
 
+## Results at a Glance
+
+The figures below show how each model highlights an anomalous ECG window.
+Attention and SHAP provide two complementary views of the time points and ECG
+leads that contribute most to the model's explanation.
+
+<table>
+  <tr>
+    <th align="center">Model</th>
+    <th align="center">Attention</th>
+    <th align="center">SHAP</th>
+  </tr>
+  <tr>
+    <td align="center"><strong>AnoFormer</strong></td>
+    <td align="center"><img src="assets/results/anoformer-attention-anomalous-ecg.png" alt="AnoFormer attention importance over an anomalous ECG window" width="420"></td>
+    <td align="center"><img src="assets/results/anoformer-shap-anomalous-ecg.png" alt="AnoFormer SHAP importance over an anomalous ECG window" width="420"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>TranAD</strong></td>
+    <td align="center"><img src="assets/results/tranad-attention-anomalous-ecg.png" alt="TranAD attention importance over an anomalous ECG window" width="420"></td>
+    <td align="center"><img src="assets/results/tranad-shap-anomalous-ecg.png" alt="TranAD SHAP importance over an anomalous ECG window" width="420"></td>
+  </tr>
+</table>
+
+Each plot overlays importance on the ECG leads; brighter colors indicate
+regions with higher normalized importance. The SHAP figures are generated in
+the corresponding explanation notebooks, while the attention figures come
+from the model training notebooks.
+
 ## Repository Structure
 
 ```text
